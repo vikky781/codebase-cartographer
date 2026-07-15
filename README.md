@@ -46,16 +46,28 @@ On Windows, use the absolute path to `cartographer-mcp.exe` in the client config
 
 ### Codex
 
-The repository includes a Codex plugin at `plugins/codebase-cartographer/` and a local marketplace definition at `marketplace.json`.
+The repository includes a Codex plugin at `plugins/codebase-cartographer/` and a bundled local marketplace catalog at `marketplace.json`.
+
+This is a local-checkout installation path for testing and direct distribution. It is not an official public Plugins Directory listing. The documented repo marketplace location is `.agents/plugins/marketplace.json`, so copy the bundled catalog into that location before adding the checkout as a marketplace source.
 
 ```bash
 git clone https://github.com/vikky781/codebase-cartographer.git
 cd codebase-cartographer
-codex plugin marketplace add /absolute/path/to/codebase-cartographer
-codex plugin add codebase-cartographer@codebase-cartographer-local
+mkdir -p .agents/plugins
+cp marketplace.json .agents/plugins/marketplace.json
+codex plugin marketplace add .
+codex plugin marketplace list
 ```
 
-Restart or reload Codex after installation. The plugin starts the local `cartographer-mcp` stdio server. Its runtime prerequisite is intentionally explicit: plugin configuration alone cannot safely install Python dependencies into a desktop host environment.
+Restart the ChatGPT/Codex desktop app, open **Plugins**, select **Codebase Cartographer Local**, install `codebase-cartographer`, and start a new task. The plugin starts the local `cartographer-mcp` stdio server. Its runtime prerequisite is intentionally explicit: plugin configuration alone cannot safely install Python dependencies into a desktop host environment.
+
+After pulling a newer revision, refresh the marketplace and restart the desktop app:
+
+```bash
+codex plugin marketplace upgrade codebase-cartographer-local
+```
+
+Publishing to the official public Plugins Directory is a later step that requires OpenAI's plugin submission and review process.
 
 ### Claude Code
 
