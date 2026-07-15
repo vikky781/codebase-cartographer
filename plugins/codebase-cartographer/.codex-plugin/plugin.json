@@ -1,0 +1,35 @@
+{
+  "name": "codebase-cartographer",
+  "version": "0.1.0+codex.20260715210003",
+  "description": "Local codebase intelligence for Codex using static analysis and graph algorithms.",
+  "author": {
+    "name": "CodebaseCartographer contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "codex",
+    "codebase",
+    "knowledge-graph",
+    "static-analysis"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codebase Cartographer",
+    "shortDescription": "Map, trace, and review a local codebase.",
+    "longDescription": "Analyze a local repository with Tree-sitter, Git history, and graph algorithms. CodebaseCartographer runs locally and makes no application-level API calls.",
+    "developerName": "CodebaseCartographer contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Analyze this repository and summarize its architecture.",
+      "Find the most important dependencies and likely bottlenecks.",
+      "Trace the flow through the authentication code."
+    ],
+    "brandColor": "#2563EB"
+  },
+  "mcpServers": "./.mcp.json"
+}
