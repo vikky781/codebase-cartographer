@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "codebase-cartographer": {
+      "type": "stdio",
+      "command": "cartographer-mcp",
+      "args": []
+    }
+  }
+}

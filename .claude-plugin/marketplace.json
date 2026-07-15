@@ -1,0 +1,17 @@
+{
+  "name": "codebase-cartographer",
+  "owner": {
+    "name": "vikky781"
+  },
+  "description": "CodebaseCartographer plugins for Claude Code.",
+  "plugins": [
+    {
+      "name": "codebase-cartographer",
+      "source": "./integrations/claude-code",
+      "description": "Local codebase intelligence via static analysis and graph algorithms.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "repository": "https://github.com/vikky781/codebase-cartographer"
+    }
+  ]
+}

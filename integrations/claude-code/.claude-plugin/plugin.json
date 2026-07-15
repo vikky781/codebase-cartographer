@@ -1,0 +1,5 @@
+{
+  "name": "codebase-cartographer",
+  "version": "0.1.0",
+  "description": "Local codebase intelligence via static analysis and graph algorithms."
+}
