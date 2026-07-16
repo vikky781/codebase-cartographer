@@ -99,6 +99,10 @@ class AnalyzeInput(BaseModel):
         default=None,
         description="Optional subdirectory to analyze, e.g. 'src/' for large repos",
     )
+    use_cache: bool = Field(
+        default=True,
+        description="Whether to read or write the disposable .cartographer_cache graph cache",
+    )
 
 
 class AnalyzeOutput(BaseModel):

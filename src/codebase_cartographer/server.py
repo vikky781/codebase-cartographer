@@ -215,7 +215,7 @@ def _validate_analyzed_file_path(graph: CodeGraph, file_path: str) -> str:
 
 @mcp.tool()
 @_with_state_lock
-def analyze_repo(repo_path: str, scope: str | None = None) -> str:
+def analyze_repo(repo_path: str, scope: str | None = None, use_cache: bool = True) -> str:
     """Analyze a code repository and build a knowledge graph of its structure.
     Call this FIRST before using any other CodebaseCartographer tool.
 
@@ -226,6 +226,7 @@ def analyze_repo(repo_path: str, scope: str | None = None) -> str:
     Parameters:
     - repo_path (required): absolute path to the repository root
     - scope (optional): subdirectory to analyze (e.g. "src/") for large repos
+    - use_cache (optional): set false to avoid reading or writing `.cartographer_cache`
 
     Returns: summary statistics including file count, language breakdown,
     entity counts, detected architectural layers, and health indicators
@@ -240,7 +241,7 @@ def analyze_repo(repo_path: str, scope: str | None = None) -> str:
     _reset_analysis_state()
     try:
         try:
-            request = AnalyzeInput(repo_path=repo_path, scope=scope)
+            request = AnalyzeInput(repo_path=repo_path, scope=scope, use_cache=use_cache)
             repository = _validate_repository_path(request.repo_path)
             normalized_scope = _resolve_scope(repository, request.scope)
         except Exception as exc:
@@ -256,10 +257,17 @@ def analyze_repo(repo_path: str, scope: str | None = None) -> str:
         warnings: list[str] = []
         cache_is_safe = _can_reuse_cache(git_analyzer, repo_hash)
         cache_loaded = (
-            normalized_scope is None and cache_is_safe and graph.load_cache(str(repository))
+            request.use_cache
+            and normalized_scope is None
+            and cache_is_safe
+            and graph.load_cache(str(repository))
         )
         if not cache_loaded:
-            if normalized_scope is None and not cache_is_safe:
+            if not request.use_cache:
+                warnings.append(
+                    "Graph cache was disabled for this analysis; no cache was read or written."
+                )
+            elif normalized_scope is None and not cache_is_safe:
                 warnings.append(_cache_bypass_warning(git_analyzer, repo_hash))
             try:
                 parsed_files, parse_warnings = parse_repository(repository, normalized_scope)
@@ -271,7 +279,7 @@ def analyze_repo(repo_path: str, scope: str | None = None) -> str:
                 )
             warnings.extend(parse_warnings)
             graph.build(parsed_files, str(repository), repo_hash)
-            if normalized_scope is None and cache_is_safe:
+            if request.use_cache and normalized_scope is None and cache_is_safe:
                 graph.save_cache(str(repository))
 
         _git_analyzer = git_analyzer

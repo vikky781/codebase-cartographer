@@ -74,12 +74,15 @@ def main(ctx: click.Context, repo_path: Path | None) -> None:
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
 )
 @click.option("--scope", default=None, help="Subdirectory to analyze")
-def analyze(repo_path: Path, scope: str | None):
+@click.option("--no-cache", is_flag=True, help="Do not read or write .cartographer_cache")
+def analyze(repo_path: Path, scope: str | None, no_cache: bool):
     """Analyze a repository and build the knowledge graph."""
     try:
         from .server import analyze_repo
 
-        result = _parse_result(analyze_repo(str(Path(repo_path).resolve()), scope))
+        result = _parse_result(
+            analyze_repo(str(Path(repo_path).resolve()), scope, use_cache=not no_cache)
+        )
         if not isinstance(result, dict):
             raise RuntimeError("Analysis returned an unexpected response.")
 

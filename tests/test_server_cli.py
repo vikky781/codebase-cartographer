@@ -126,6 +126,15 @@ def test_cli_query_reuses_a_clean_git_cache(git_repo: Path, monkeypatch: pytest.
     assert "hello" in search.output
 
 
+def test_analyze_can_disable_cache_writes(git_repo: Path):
+    """Privacy-sensitive analysis must have a no-write path even for clean Git repositories."""
+    result = _response(server.analyze_repo(str(git_repo), use_cache=False))
+
+    assert result["status"] == "success"
+    assert not (git_repo / ".cartographer_cache").exists()
+    assert any("cache was disabled" in warning for warning in result["warnings"])
+
+
 def test_dirty_git_repository_bypasses_cache(git_repo: Path):
     assert _response(server.analyze_repo(str(git_repo)))["status"] == "success"
     server._reset_analysis_state()
