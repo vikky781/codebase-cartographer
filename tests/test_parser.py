@@ -176,3 +176,38 @@ class TestParseRepository:
 
         assert len(parsed_files) == 1
         assert any("recovered from syntax errors" in warning for warning in warnings)
+
+    @pytest.mark.parametrize(
+        ("filename", "source", "expected_functions"),
+        [
+            (
+                "Auth.java",
+                "public class Auth {\n"
+                "    public void authenticate(String user) {}\n"
+                "    if (enabled) {}\n"
+                "}\n",
+                {"authenticate"},
+            ),
+            (
+                "auth.cpp",
+                "void login(std::string user) {}\n"
+                "if (enabled) {}\n",
+                {"login"},
+            ),
+        ],
+    )
+    def test_regex_fallback_ignores_control_flow_and_keeps_c_style_declarations(
+        self, local_tmp_path, filename, source, expected_functions
+    ):
+        """Fallback parsing must remain conservative rather than inventing declarations."""
+        (local_tmp_path / filename).write_text(source, encoding="utf-8")
+
+        parsed_files, _ = parse_repository(local_tmp_path)
+
+        parsed_file = parsed_files[0]
+        assert parsed_file.parse_method == "regex-fallback"
+        function_names = {
+            entity.name for entity in parsed_file.entities if entity.type == "function"
+        }
+        assert expected_functions <= function_names
+        assert "if" not in function_names

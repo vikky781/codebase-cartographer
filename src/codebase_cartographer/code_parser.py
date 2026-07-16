@@ -447,13 +447,35 @@ class JavaScriptExtractor:
 class RegexExtractor:
     """Provide a best-effort parser for languages without Tree-sitter grammars."""
 
-    _FUNCTION_PATTERN = re.compile(
-        r"^\s*(?:def|func|fn|function|public|private|protected|static)?\s*(\w+)\s*\("
+    _KEYWORD_FUNCTION_PATTERN = re.compile(
+        r"^\s*(?:def|func|fn|fun|function)\s+([A-Za-z_]\w*)\s*\("
+    )
+    _C_STYLE_FUNCTION_PATTERN = re.compile(
+        r"^\s*(?:(?:public|private|protected|internal|static|final|abstract|virtual|"
+        r"override|async|extern|unsafe|inline|constexpr|friend|sealed|partial|readonly|"
+        r"synchronized)\s+)*(?:[A-Za-z_]\w*(?:\s*<[\w\s,.:?*&]+>)?\s+)+"
+        r"([A-Za-z_]\w*)\s*\("
     )
     _CLASS_PATTERN = re.compile(r"^\s*(?:class|struct|interface|enum)\s+(\w+)")
     _PYTHON_IMPORT_PATTERN = re.compile(r"^(?:from\s+(\S+)\s+)?import\s+(.+)$")
     _JAVASCRIPT_IMPORT_PATTERN = re.compile(r"^import\s+.*from\s+[\"'](.+)[\"']")
     _JAVA_GO_IMPORT_PATTERN = re.compile(r"^import\s+[\"']?(.+?)[\"']?\s*;?\s*$")
+    _CONTROL_FLOW_PREFIXES = frozenset(
+        {
+            "if",
+            "else",
+            "for",
+            "while",
+            "switch",
+            "case",
+            "catch",
+            "return",
+            "throw",
+            "new",
+            "delete",
+            "sizeof",
+        }
+    )
 
     def extract(
         self, source_text: str, file_path: str, language: str
@@ -464,11 +486,11 @@ class RegexExtractor:
         source_module = _source_module(file_path)
 
         for line_number, line in enumerate(source_text.splitlines(), start=1):
-            function_match = self._FUNCTION_PATTERN.match(line)
-            if function_match:
+            function_name = self._extract_function_name(line)
+            if function_name:
                 entities.append(
                     CodeEntity(
-                        name=function_match.group(1),
+                        name=function_name,
                         type="function",
                         file_path=file_path,
                         line_start=line_number,
@@ -499,6 +521,20 @@ class RegexExtractor:
                 imports.append(edge)
 
         return entities, imports, []
+
+    def _extract_function_name(self, line: str) -> str | None:
+        """Return a conservative declaration name without mistaking control flow for code."""
+        stripped = line.lstrip()
+        first_token = stripped.split(None, 1)[0].rstrip("(") if stripped else ""
+        if first_token.casefold() in self._CONTROL_FLOW_PREFIXES:
+            return None
+
+        keyword_match = self._KEYWORD_FUNCTION_PATTERN.match(line)
+        if keyword_match:
+            return keyword_match.group(1)
+
+        c_style_match = self._C_STYLE_FUNCTION_PATTERN.match(line)
+        return c_style_match.group(1) if c_style_match else None
 
     def _extract_import(self, line: str, language: str, source_module: str) -> ImportEdge | None:
         """Create an import edge from one line of fallback-parsed source."""
