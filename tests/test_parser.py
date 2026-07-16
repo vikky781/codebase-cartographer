@@ -125,6 +125,22 @@ class TestParseRepository:
 
         assert {edge.target_module for edge in parsed_files[0].imports} == {"alpha", "beta"}
 
+    def test_python_signature_preserves_type_annotations(self, local_tmp_path):
+        """A signature is evidence for a change plan and must not stop at an annotation colon."""
+        (local_tmp_path / "typed.py").write_text(
+            "def login(username: str, password: str) -> Token:\n    return Token()\n",
+            encoding="utf-8",
+        )
+
+        parsed_files, _ = parse_repository(local_tmp_path)
+        login = next(
+            entity
+            for entity in parsed_files[0].entities
+            if entity.type == "function" and entity.name == "login"
+        )
+
+        assert login.signature == "def login(username: str, password: str) -> Token"
+
     @pytest.mark.parametrize(
         ("filename", "source", "expected_entities"),
         [

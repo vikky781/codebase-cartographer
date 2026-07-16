@@ -118,6 +118,18 @@ def _line_complexity(node: Node) -> int:
     return node.end_point[0] - node.start_point[0] + 1
 
 
+def _definition_signature(node: Node, source_bytes: bytes) -> str | None:
+    """Return a normalized declaration header without confusing annotation and terminator colons."""
+    try:
+        body = node.child_by_field_name("body")
+        end_byte = body.start_byte if body is not None else node.end_byte
+        header = source_bytes[node.start_byte:end_byte].decode("utf-8").strip()
+        header = " ".join(header.split()).rstrip(":").strip()
+        return header or None
+    except (AttributeError, UnicodeDecodeError):
+        return None
+
+
 class TreeSitterManager:
     """Create and cache Tree-sitter parsers for supported languages."""
 
@@ -174,7 +186,6 @@ class PythonExtractor:
         self, root_node: Node, file_path: str, source_bytes: bytes
     ) -> tuple[list[CodeEntity], list[ImportEdge], list[CallEdge]]:
         """Extract structured code graph data from a Python syntax tree."""
-        del source_bytes  # Node text contains the source slices needed by this extractor.
         entities: list[CodeEntity] = []
         imports: list[ImportEdge] = []
         calls: list[CallEdge] = []
@@ -208,8 +219,7 @@ class PythonExtractor:
                     node, file_path, qualified_name
                 )
                 calls.extend(function_edges)
-                first_line = _node_text(node).splitlines()[0] if _node_text(node) else ""
-                signature = first_line.split(":", 1)[0].strip()
+                signature = _definition_signature(node, source_bytes)
                 entities.append(
                     CodeEntity(
                         name=qualified_name,
@@ -217,7 +227,7 @@ class PythonExtractor:
                         file_path=file_path,
                         line_start=node.start_point[0] + 1,
                         line_end=node.end_point[0] + 1,
-                        signature=signature or None,
+                        signature=signature,
                         complexity=_line_complexity(node),
                         calls=function_calls,
                     )
