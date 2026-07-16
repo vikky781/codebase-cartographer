@@ -111,12 +111,14 @@ class AppConfig:
     co_change_min_percentage: float = 50.0
     god_class_fan_threshold: int = 10
     max_cycles: int = 100
+    max_cycle_scc_nodes: int = 100
+    max_cycle_scc_edges: int = 500
     max_search_query_length: int = 120
     max_exact_centrality_nodes: int = 250
     centrality_sample_nodes: int = 100
     cache_dir_name: str = ".cartographer_cache"
     cache_file_name: str = "graph_cache.json"
-    cache_schema_version: int = 3
+    cache_schema_version: int = 4
 
     def get_cache_path(self, repo_path: str | Path) -> Path:
         """Return the cache file path for a repository."""

@@ -78,6 +78,12 @@ class AnalysisCoverage(BaseModel):
     import_edges_ambiguous: int = Field(
         default=0, description="Imports with multiple plausible local module targets"
     )
+    cycle_detection_skipped_components: int = Field(
+        default=0,
+        description=(
+            "Strongly connected module components skipped because they exceed cycle budgets"
+        ),
+    )
 
 
 class HealthSummary(BaseModel):

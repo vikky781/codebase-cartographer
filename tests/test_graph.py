@@ -73,6 +73,21 @@ class TestCycleDetection:
         # There should be at least one cycle
         assert len(cycles) > 0, "Expected to find the circular dependency between models and utils"
 
+    def test_skips_cycle_enumeration_for_oversized_strong_component(self, monkeypatch):
+        """A dense component must be disclosed as skipped instead of expanding unbounded cycles."""
+        graph = CodeGraph()
+        nodes = ["one.py", "two.py", "three.py"]
+        for node_id in nodes:
+            graph.graph.add_node(node_id, type="module", file_path=node_id, name=node_id)
+        for source in nodes:
+            for target in nodes:
+                if source != target:
+                    graph.graph.add_edge(source, target, type="imports")
+
+        monkeypatch.setattr(get_config(), "max_cycle_scc_nodes", 2)
+        assert graph.find_cycles() == []
+        assert graph.get_analysis_coverage().cycle_detection_skipped_components == 1
+
 
 class TestDeadCode:
     def test_finds_dead_functions(self, built_graph):

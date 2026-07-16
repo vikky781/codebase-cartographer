@@ -311,6 +311,11 @@ def analyze_repo(repo_path: str, scope: str | None = None, use_cache: bool = Tru
                 f"{coverage.import_edges_ambiguous} import edge(s) were left unresolved because "
                 "multiple local modules were plausible."
             )
+        if coverage.cycle_detection_skipped_components:
+            warnings.append(
+                f"Cycle detection skipped {coverage.cycle_detection_skipped_components} oversized "
+                "strongly connected component(s) to keep analysis bounded."
+            )
         output = AnalyzeOutput(
             analysis_scope=normalized_scope,
             is_partial=normalized_scope is not None,

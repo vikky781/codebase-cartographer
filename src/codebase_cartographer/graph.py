@@ -977,19 +977,46 @@ class CodeGraph:
         return self._communities_cache
 
     def find_cycles(self) -> list[list[str]]:
-        """Return module import cycles up to ten modules long, shortest first."""
+        """Return bounded import cycles and skip overly large strongly connected components."""
         module_graph = self._import_module_graph()
         try:
+            config = get_config()
             limit = get_config().max_cycles
-            try:
-                cycles = list(islice(nx.simple_cycles(module_graph, length_bound=10), limit))
-            except TypeError:
-                cycles = list(
-                    islice(
-                        (cycle for cycle in nx.simple_cycles(module_graph) if len(cycle) <= 10),
-                        limit,
+            cycles: list[list[str]] = []
+            skipped_components = 0
+            components = sorted(
+                nx.strongly_connected_components(module_graph),
+                key=lambda component: (len(component), sorted(component)),
+            )
+            for component in components:
+                if len(cycles) >= limit:
+                    break
+                if len(component) == 1:
+                    node_id = next(iter(component))
+                    if not module_graph.has_edge(node_id, node_id):
+                        continue
+
+                subgraph = module_graph.subgraph(component).copy()
+                if (
+                    len(component) > config.max_cycle_scc_nodes
+                    or subgraph.number_of_edges() > config.max_cycle_scc_edges
+                ):
+                    skipped_components += 1
+                    continue
+
+                remaining = limit - len(cycles)
+                try:
+                    cycles.extend(
+                        islice(nx.simple_cycles(subgraph, length_bound=10), remaining)
                     )
-                )
+                except TypeError:
+                    cycles.extend(
+                        islice(
+                            (cycle for cycle in nx.simple_cycles(subgraph) if len(cycle) <= 10),
+                            remaining,
+                        )
+                    )
+            self.analysis_coverage.cycle_detection_skipped_components = skipped_components
             return sorted(cycles, key=lambda cycle: (len(cycle), cycle))
         except Exception:
             return []
