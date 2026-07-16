@@ -728,7 +728,7 @@ class CodeGraph:
         return results
 
     def get_complexity(self, top_n: int = 15) -> list[MetricResult]:
-        """Rank functions and classes by their extracted complexity score."""
+        """Rank functions and classes by static line span, not control-flow complexity."""
         code_entities = [
             (node_id, entity)
             for node_id, entity in self.entities.items()
@@ -738,11 +738,11 @@ class CodeGraph:
         results: list[MetricResult] = []
         for rank, (_, entity) in enumerate(ranked[: max(0, top_n)], start=1):
             if entity.complexity > 50:
-                interpretation = "Very complex — consider refactoring"
+                interpretation = "Large static line span — inspect for focused responsibilities"
             elif entity.complexity >= 20:
-                interpretation = "Moderate complexity"
+                interpretation = "Moderate static line span"
             else:
-                interpretation = "Low complexity"
+                interpretation = "Small static line span"
             results.append(
                 MetricResult(
                     entity_name=entity.name,
@@ -751,7 +751,7 @@ class CodeGraph:
                     score=float(entity.complexity),
                     rank=rank,
                     interpretation=interpretation,
-                    source="tree-sitter-complexity",
+                    source="tree-sitter-line-span",
                 )
             )
         return results

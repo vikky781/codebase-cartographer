@@ -116,7 +116,8 @@ def analyze(repo_path: Path, scope: str | None):
         health_style = "red" if issue_count else "green"
         console.print(
             f"[{health_style}]Health:[/{health_style}] "
-            f"{issue_count} issue(s), average complexity {health.get('avg_complexity', 0):.1f}"
+            f"{issue_count} issue candidate(s), average static line span "
+            f"{health.get('avg_complexity', 0):.1f}"
         )
         for field in issue_fields:
             value = health.get(field, 0)

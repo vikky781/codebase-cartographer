@@ -339,7 +339,7 @@ class MermaidVisualizer:
 
         lines = [
             "flowchart TD",
-            "%% Colors indicate static complexity; Git change-frequency data is unavailable.",
+        "%% Colors indicate static line span; Git change-frequency data is unavailable.",
         ]
         lines.extend(self._node_definition(node_id, node_ids[node_id]) for node_id in selected)
         for source, target, attributes in self.graph.graph.edges(data=True):

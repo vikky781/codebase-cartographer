@@ -63,7 +63,7 @@ class TestMermaidVisualizer:
         inp = VisualizeInput(diagram_type="hotspot_map")
         result = visualizer.generate(inp)
         assert "mermaid" in result
-        assert "static complexity" in result.lower()
+        assert "static line span" in result.lower()
         assert "change-frequency data is unavailable" in result.lower()
 
     def test_ids_are_safe_unique_and_not_mermaid_keywords(self, visualizer):

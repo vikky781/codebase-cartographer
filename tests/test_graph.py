@@ -50,6 +50,16 @@ class TestPageRank:
             assert r.source == "networkx-pagerank"
 
 
+class TestStaticLineSpan:
+    def test_size_metric_does_not_claim_cyclomatic_complexity(self, built_graph):
+        """The compatibility metric must accurately disclose what its score represents."""
+        results = built_graph.get_complexity(top_n=3)
+
+        assert results
+        assert all(result.source == "tree-sitter-line-span" for result in results)
+        assert all("line span" in result.interpretation.casefold() for result in results)
+
+
 class TestCentrality:
     def test_returns_results(self, built_graph):
         results = built_graph.get_centrality(top_n=5)

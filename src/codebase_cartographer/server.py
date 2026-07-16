@@ -221,7 +221,7 @@ def analyze_repo(repo_path: str, scope: str | None = None) -> str:
 
     This parses all source files using Tree-sitter AST analysis, extracts
     git history, builds a dependency/call graph, and computes structural
-    metrics (PageRank, centrality, complexity, coupling).
+    metrics (PageRank, centrality, static line span, coupling).
 
     Parameters:
     - repo_path (required): absolute path to the repository root
@@ -453,7 +453,7 @@ def get_metrics(metric: str = "summary", top_n: int = 15) -> str:
     - metric (required): one of:
       - "pagerank": structural importance ranking (like Google PageRank for code)
       - "centrality": betweenness centrality (bridge/bottleneck files)
-      - "complexity": complexity scores per function/class
+      - "complexity": static line-span size per function/class (not cyclomatic complexity)
       - "hotspots": most frequently changed files (from git history)
       - "coupling": coupling scores between module pairs
       - "ownership": code ownership by author (from git blame)
@@ -535,7 +535,7 @@ def get_metrics(metric: str = "summary", top_n: int = 15) -> str:
 
 
 def _hotspot_metrics(graph: CodeGraph, git_analyzer: GitAnalyzer, top_n: int) -> list[MetricResult]:
-    """Combine git change frequency with static complexity into hotspot scores."""
+    """Combine Git change frequency with static line span into hotspot scores."""
     frequencies = git_analyzer.get_all_file_change_frequencies()
     analyzed_modules = set(_module_paths(graph))
     complexity_by_file: dict[str, float] = {}
@@ -557,9 +557,9 @@ def _hotspot_metrics(graph: CodeGraph, git_analyzer: GitAnalyzer, top_n: int) ->
                 score=float(frequency * complexity),
                 rank=0,
                 interpretation=(
-                    f"Changed {frequency} times with cumulative complexity {complexity:.0f}"
+                    f"Changed {frequency} times with cumulative static line span {complexity:.0f}"
                 ),
-                source="git-log+tree-sitter-complexity",
+                source="git-log+tree-sitter-line-span",
             )
         )
     ranked = sorted(results, key=lambda result: result.score, reverse=True)
