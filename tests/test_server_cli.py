@@ -75,6 +75,15 @@ def test_analyze_rejects_scope_outside_repository(sample_repo_path: str):
     assert get_graph().is_built is False
 
 
+def test_scoped_analysis_discloses_that_the_graph_is_partial(sample_repo_path: str):
+    result = _response(server.analyze_repo(sample_repo_path, "auth", use_cache=False))
+
+    assert result["status"] == "success"
+    assert result["analysis_scope"] == "auth"
+    assert result["is_partial"] is True
+    assert any("limited to 'auth'" in warning for warning in result["warnings"])
+
+
 def test_failed_analysis_clears_existing_graph(sample_repo_path: str, tmp_path: Path):
     successful = _response(server.analyze_repo(sample_repo_path))
     assert successful["status"] == "success"

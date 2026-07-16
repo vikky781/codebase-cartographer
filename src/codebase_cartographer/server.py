@@ -282,6 +282,12 @@ def analyze_repo(repo_path: str, scope: str | None = None, use_cache: bool = Tru
             if request.use_cache and normalized_scope is None and cache_is_safe:
                 graph.save_cache(str(repository))
 
+        if normalized_scope is not None:
+            warnings.append(
+                f"Analysis was limited to '{normalized_scope}'; files outside this scope were not "
+                "analyzed, so missing relationships and issue candidates are incomplete."
+            )
+
         _git_analyzer = git_analyzer
         _visualizer = MermaidVisualizer(
             graph, git_analyzer.get_all_file_change_frequencies()
@@ -306,6 +312,8 @@ def analyze_repo(repo_path: str, scope: str | None = None, use_cache: bool = Tru
                 "multiple local modules were plausible."
             )
         output = AnalyzeOutput(
+            analysis_scope=normalized_scope,
+            is_partial=normalized_scope is not None,
             files_analyzed=entity_counts.modules,
             languages=_language_counts(graph),
             entities=entity_counts,
@@ -567,9 +575,14 @@ def _hotspot_metrics(graph: CodeGraph, git_analyzer: GitAnalyzer, top_n: int) ->
                 score=float(frequency * complexity),
                 rank=0,
                 interpretation=(
-                    f"Changed {frequency} times with cumulative static line span {complexity:.0f}"
+                    f"Touched {frequency} time(s) within the most recent "
+                    f"{get_config().max_git_history_commits} commits; cumulative static line "
+                    f"span {complexity:.0f}"
                 ),
-                source="git-log+tree-sitter-line-span",
+                source=(
+                    f"git-log-last-{get_config().max_git_history_commits}"
+                    "+tree-sitter-line-span"
+                ),
             )
         )
     ranked = sorted(results, key=lambda result: result.score, reverse=True)
@@ -676,10 +689,10 @@ def get_git_context(file_path: str, entity_name: str | None = None) -> str:
 
     Returns:
     - authors: who contributed to this file and their line counts
-    - change_frequency: how many times this file changed in git history
+    - change_frequency: how many times this file changed in the configured recent Git history window
     - recent_commits: last 10 commits touching this file (SHA, date, message, author)
     - co_changed_files: files that usually change in the same commit
-    - file_age: when first created and last modified
+    - file_age: earliest known and last modified dates in the configured recent history window
 
     Commit messages often explain WHY code was written or changed.
     Co-changed files reveal hidden coupling not visible in imports.

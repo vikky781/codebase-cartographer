@@ -432,6 +432,48 @@ class TestHealthSummary:
         assert health.dead_functions >= 0
         assert health.avg_complexity >= 0
 
+    def test_health_summary_excludes_unavailable_regex_line_span(self):
+        """Fallback inventories use zero as unavailable data, not as a real size measurement."""
+        graph = CodeGraph()
+        parsed_file = ParsedFile(
+            file_path="mixed.py",
+            language="python",
+            entities=[
+                CodeEntity(
+                    name="measured",
+                    type="function",
+                    file_path="mixed.py",
+                    line_start=1,
+                    line_end=10,
+                    complexity=10,
+                )
+            ],
+            imports=[],
+            calls=[],
+            parse_method="tree-sitter",
+        )
+        fallback_file = ParsedFile(
+            file_path="legacy.java",
+            language="unknown",
+            entities=[
+                CodeEntity(
+                    name="unknown_size",
+                    type="function",
+                    file_path="legacy.java",
+                    line_start=1,
+                    line_end=1,
+                    complexity=0,
+                    source="regex-fallback",
+                )
+            ],
+            imports=[],
+            calls=[],
+            parse_method="regex-fallback",
+        )
+        graph.build([parsed_file, fallback_file], str(Path.cwd()), repo_hash="")
+
+        assert graph.get_health_summary().avg_complexity == 10.0
+
 
 class TestDetectLayers:
     def test_detects_layers(self, built_graph):

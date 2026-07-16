@@ -123,7 +123,7 @@ class GitAnalyzer:
             return 0
 
     def get_file_age(self, file_path: str) -> FileAge | None:
-        """Return the first and last commit dates for a file."""
+        """Return the earliest known and latest dates within the configured history window."""
         try:
             if not self.available or self.repo is None:
                 return None
@@ -243,9 +243,10 @@ class GitAnalyzer:
     def get_full_context(self, file_path: str, entity_name: str | None = None) -> GitContextOutput:
         """Return all available git context for a file in one structured response."""
         try:
-            source = "git-log"
+            history_limit = get_config().max_git_history_commits
+            source = f"git-log (up to {history_limit} most recent commits)"
             if entity_name:
-                source = "git-log (file-level; entity filtering unavailable)"
+                source += "; file-level; entity filtering unavailable"
             return GitContextOutput(
                 file_path=file_path,
                 authors=self.get_file_blame(file_path),

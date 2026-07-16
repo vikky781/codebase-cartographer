@@ -86,7 +86,12 @@ class HealthSummary(BaseModel):
     circular_dependencies: int = 0
     dead_functions: int = 0
     god_classes: int = 0
-    avg_complexity: float = 0.0
+    avg_complexity: float = Field(
+        default=0.0,
+        description=(
+            "Average static line span across Tree-sitter entities; regex fallback files excluded"
+        ),
+    )
     bottleneck_count: int = 0
     orphan_files: int = 0
 
@@ -109,6 +114,14 @@ class AnalyzeOutput(BaseModel):
     """Return the aggregate results of a repository analysis."""
 
     status: str = Field(default="success")
+    analysis_scope: str | None = Field(
+        default=None,
+        description="Relative subdirectory analyzed, or null when the full repository was analyzed",
+    )
+    is_partial: bool = Field(
+        default=False,
+        description="True when a scope excluded repository files from this analysis",
+    )
     files_analyzed: int = 0
     languages: dict[str, int] = Field(
         default_factory=dict, description="Language name to file count mapping"
@@ -276,7 +289,9 @@ class CoChangeInfo(BaseModel):
 class FileAge(BaseModel):
     """Summarize creation and modification timing for a file."""
 
-    created_date: str
+    created_date: str = Field(
+        description="Earliest commit date found within the configured recent-history window"
+    )
     last_modified_date: str
     days_since_last_change: int
 
@@ -286,7 +301,10 @@ class GitContextOutput(BaseModel):
 
     file_path: str
     authors: list[AuthorInfo] = Field(default_factory=list)
-    change_frequency: int = Field(default=0, description="Total commits touching this file")
+    change_frequency: int = Field(
+        default=0,
+        description="Commits touching this file within the configured recent-history window",
+    )
     recent_commits: list[CommitInfo] = Field(default_factory=list, description="Last 10 commits")
     co_changed_files: list[CoChangeInfo] = Field(
         default_factory=list, description="Top 5 co-changed files"

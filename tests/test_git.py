@@ -110,4 +110,5 @@ class TestGitAnalyzerSafetyLimits:
 
         context = analyzer.get_full_context("tracked.py", entity_name="hello")
 
-        assert context.source == "git-log (file-level; entity filtering unavailable)"
+        assert "up to" in context.source
+        assert "file-level; entity filtering unavailable" in context.source

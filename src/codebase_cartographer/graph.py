@@ -1116,7 +1116,7 @@ class CodeGraph:
         complexity_scores = [
             entity.complexity
             for entity in self.entities.values()
-            if entity.type in {"function", "class"}
+            if entity.type in {"function", "class"} and entity.source != "regex-fallback"
         ]
         return HealthSummary(
             circular_dependencies=len(self.find_cycles()),
