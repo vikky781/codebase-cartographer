@@ -5,6 +5,7 @@ import pytest
 
 from codebase_cartographer.code_parser import parse_repository, scan_repository
 from codebase_cartographer.config import get_config
+from codebase_cartographer.graph import CodeGraph
 
 
 @pytest.fixture
@@ -115,7 +116,52 @@ class TestParseRepository:
         }
 
         assert functions["outer"].calls == ["nested"]
-        assert functions["nested"].calls == ["child"]
+        assert functions["outer.nested"].calls == ["child"]
+
+    def test_nested_same_named_functions_keep_distinct_lexical_graph_nodes(self, local_tmp_path):
+        """Functions with the same terminal name must not collapse into one graph node."""
+        (local_tmp_path / "nested.py").write_text(
+            "def first():\n"
+            "    def helper():\n"
+            "        return 1\n"
+            "    return helper()\n\n"
+            "def second():\n"
+            "    def helper():\n"
+            "        return 2\n"
+            "    return helper()\n",
+            encoding="utf-8",
+        )
+
+        parsed_files, _ = parse_repository(local_tmp_path)
+        graph = CodeGraph()
+        graph.build(parsed_files, str(local_tmp_path), repo_hash="")
+
+        function_names = {
+            entity.name
+            for entity in parsed_files[0].entities
+            if entity.type == "function"
+        }
+        assert {"first", "first.helper", "second", "second.helper"} <= function_names
+        assert graph.get_entity_counts().functions == 4
+        assert graph.graph.has_edge("nested.py::first", "nested.py::first.helper")
+        assert graph.graph.has_edge("nested.py::second", "nested.py::second.helper")
+
+    def test_python_import_aliases_preserve_exported_and_local_names(self, local_tmp_path):
+        """Alias data is necessary for conservative graph resolution later in the pipeline."""
+        (local_tmp_path / "aliases.py").write_text(
+            "from library import Foo as LocalFoo\nimport package.child as child_alias\n",
+            encoding="utf-8",
+        )
+
+        parsed_files, _ = parse_repository(local_tmp_path)
+        imports = parsed_files[0].imports
+
+        assert imports[0].imported_names == ["Foo"]
+        assert imports[0].local_names == ["LocalFoo"]
+        assert imports[0].is_from_import is True
+        assert imports[1].imported_names == ["package.child"]
+        assert imports[1].local_names == ["child_alias"]
+        assert imports[1].is_from_import is False
 
     def test_multiple_python_imports_create_individual_dependency_edges(self, local_tmp_path):
         """``import a, b`` must not silently omit the second module dependency."""

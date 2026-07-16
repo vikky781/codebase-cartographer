@@ -343,6 +343,88 @@ class TestAmbiguousResolution:
         assert graph.get_analysis_coverage().import_edges_ambiguous == 1
 
 
+class TestImportBindingResolution:
+    @staticmethod
+    def _function(name: str, file_path: str) -> CodeEntity:
+        return CodeEntity(
+            name=name,
+            type="function",
+            file_path=file_path,
+            line_start=1,
+            line_end=1,
+        )
+
+    def test_unimported_name_is_not_resolved_from_an_imported_module(self):
+        """An unrelated `foo()` must not point at `library.foo` after importing only `Bar`."""
+        graph = CodeGraph()
+        graph.build(
+            [
+                ParsedFile(
+                    file_path="caller.py",
+                    language="python",
+                    entities=[self._function("caller", "caller.py")],
+                    imports=[ImportEdge("caller", "library", ["Bar"])],
+                    calls=[CallEdge("caller.py::caller", "foo", 3, "foo")],
+                    parse_method="tree-sitter",
+                ),
+                ParsedFile(
+                    file_path="library.py",
+                    language="python",
+                    entities=[
+                        self._function("Bar", "library.py"),
+                        self._function("foo", "library.py"),
+                    ],
+                    imports=[],
+                    calls=[],
+                    parse_method="tree-sitter",
+                ),
+            ],
+            repo_path=str(Path.cwd()),
+            repo_hash="",
+        )
+
+        assert not graph.graph.has_edge("caller.py::caller", "library.py::foo")
+        assert graph.get_analysis_coverage().call_edges_unresolved == 1
+
+    def test_from_package_import_child_resolves_the_child_module(self):
+        """A local child module imported from a package should support `child.run()` evidence."""
+        graph = CodeGraph()
+        graph.build(
+            [
+                ParsedFile(
+                    file_path="caller.py",
+                    language="python",
+                    entities=[self._function("caller", "caller.py")],
+                    imports=[ImportEdge("caller", "package", ["child"])],
+                    calls=[CallEdge("caller.py::caller", "run", 3, "child.run")],
+                    parse_method="tree-sitter",
+                ),
+                ParsedFile(
+                    file_path="package/__init__.py",
+                    language="python",
+                    entities=[],
+                    imports=[],
+                    calls=[],
+                    parse_method="tree-sitter",
+                ),
+                ParsedFile(
+                    file_path="package/child.py",
+                    language="python",
+                    entities=[self._function("run", "package/child.py")],
+                    imports=[],
+                    calls=[],
+                    parse_method="tree-sitter",
+                ),
+            ],
+            repo_path=str(Path.cwd()),
+            repo_hash="",
+        )
+
+        assert graph.graph.has_edge("caller.py", "package/child.py")
+        assert graph.graph.has_edge("caller.py::caller", "package/child.py::run")
+        assert graph.get_analysis_coverage().call_edges_resolved == 1
+
+
 class TestHealthSummary:
     def test_health_summary(self, built_graph):
         health = built_graph.get_health_summary()

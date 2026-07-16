@@ -10,7 +10,7 @@ from tempfile import NamedTemporaryFile
 
 import networkx as nx
 
-from .code_parser import CallEdge, ParsedFile
+from .code_parser import CallEdge, ImportEdge, ParsedFile
 from .config import ENTRY_POINT_PATTERNS, get_config
 from .git_analyzer import GitAnalyzer
 from .models import (
@@ -41,6 +41,15 @@ class _GraphCache:
     analysis_coverage: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _ImportBinding:
+    """Record one local import name and the local module evidence behind it."""
+
+    target_file: str
+    exported_name: str | None
+    resolution: str
+
+
 class CodeGraph:
     """Build and query a directed knowledge graph for one analyzed repository."""
 
@@ -50,6 +59,9 @@ class CodeGraph:
         self.entities: dict[str, CodeEntity] = {}
         self.modules: dict[str, str] = {}
         self._module_aliases: dict[str, set[str]] = defaultdict(set)
+        self._import_bindings: dict[str, dict[str, list[_ImportBinding]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
         self.analysis_coverage = AnalysisCoverage()
         self._ambiguous_imports: set[tuple[str, str]] = set()
         self.repo_path: str = ""
@@ -65,6 +77,7 @@ class CodeGraph:
         self.entities.clear()
         self.modules.clear()
         self._module_aliases.clear()
+        self._import_bindings.clear()
         self.analysis_coverage = AnalysisCoverage(
             tree_sitter_files=sum(
                 parsed_file.parse_method == "tree-sitter" for parsed_file in parsed_files
@@ -138,21 +151,15 @@ class CodeGraph:
                 else "regex-fallback"
             )
             for import_edge in parsed_file.imports:
-                target_file = self._resolve_module(import_edge.target_module, source_file)
-                if target_file is None and import_edge.target_module.strip(".") == "":
-                    # ``from . import name`` often refers to a sibling module.
-                    for imported_name in import_edge.imported_names:
-                        target_file = self._resolve_module(
-                            f"{import_edge.target_module}{imported_name}", source_file
-                        )
-                        if target_file is not None:
-                            break
-                if target_file is not None:
+                for target_file, resolution in self._resolve_import_edge(
+                    import_edge, source_file
+                ):
                     self._add_counted_edge(
                         source_file,
                         target_file,
                         "imports",
                         edge_source=extraction_source,
+                        resolution=resolution,
                     )
 
         # Step D: function/class call edges, resolved locally before imported modules.
@@ -225,8 +232,95 @@ class CodeGraph:
         self._ambiguous_imports.add((source_file, import_target))
         self.analysis_coverage.import_edges_ambiguous = len(self._ambiguous_imports)
 
-    def _resolve_module(self, import_target: str, source_file: str) -> str | None:
-        """Resolve an import target to a module file path in the built graph."""
+    def _resolve_import_edge(
+        self, import_edge: ImportEdge, source_file: str
+    ) -> list[tuple[str, str]]:
+        """Resolve module edges and retain only import bindings legal for later call resolution."""
+        targets: dict[str, str] = {}
+        direct_target = self._resolve_module(import_edge.target_module, source_file)
+        if direct_target is not None:
+            targets[direct_target[0]] = direct_target[1]
+
+        for imported_name, local_name in self._import_bindings_for_edge(import_edge):
+            if not imported_name or imported_name == "*":
+                continue
+
+            child_target = None
+            if import_edge.is_from_import:
+                child_target = self._resolve_module(
+                    self._join_import_target(import_edge.target_module, imported_name), source_file
+                )
+
+            if direct_target is not None:
+                self._add_import_binding(
+                    source_file,
+                    local_name,
+                    direct_target[0],
+                    imported_name if import_edge.is_from_import else None,
+                    direct_target[1],
+                )
+            if child_target is not None:
+                targets[child_target[0]] = self._merge_resolution(
+                    targets.get(child_target[0]), child_target[1]
+                )
+                # A child module is usable only through an attribute call such as ``child.run()``.
+                self._add_import_binding(
+                    source_file,
+                    local_name,
+                    child_target[0],
+                    None,
+                    child_target[1],
+                )
+
+        return sorted(targets.items())
+
+    @staticmethod
+    def _join_import_target(target_module: str, imported_name: str) -> str:
+        """Join a Python-style relative or dotted module target with an imported child name."""
+        target = target_module.strip()
+        if not target:
+            return imported_name
+        if target.rstrip(".") == "":
+            return f"{target}{imported_name}"
+        return f"{target.rstrip('.')}.{imported_name}"
+
+    @staticmethod
+    def _import_bindings_for_edge(import_edge: ImportEdge) -> list[tuple[str, str]]:
+        """Pair exported names with locally bound names while preserving legacy parser data."""
+        local_names = import_edge.local_names or import_edge.imported_names
+        if import_edge.is_from_import:
+            return [
+                (imported_name, local_names[index] if index < len(local_names) else imported_name)
+                for index, imported_name in enumerate(import_edge.imported_names)
+            ]
+
+        if local_names:
+            return [(import_edge.target_module, local_names[0])]
+        return []
+
+    def _add_import_binding(
+        self,
+        source_file: str,
+        local_name: str,
+        target_file: str,
+        exported_name: str | None,
+        resolution: str,
+    ) -> None:
+        """Record a deduplicated local binding without widening static call resolution."""
+        if not local_name:
+            return
+        binding = _ImportBinding(target_file, exported_name, resolution)
+        bindings = self._import_bindings[source_file][local_name]
+        if binding not in bindings:
+            bindings.append(binding)
+
+    @staticmethod
+    def _merge_resolution(existing: str | None, new: str) -> str:
+        """Keep the less certain resolution when several import forms point at one target."""
+        return "inferred" if existing == "inferred" or new == "inferred" else "exact"
+
+    def _resolve_module(self, import_target: str, source_file: str) -> tuple[str, str] | None:
+        """Resolve an import target to one module path and disclose the resolver's certainty."""
         raw_target = import_target.strip().strip("\"'").replace("\\", "/")
         if not raw_target:
             return None
@@ -280,7 +374,8 @@ class CodeGraph:
         for candidate in expanded_candidates:
             matches = self._module_aliases.get(candidate, set())
             if len(matches) == 1:
-                return next(iter(matches))
+                target_file = next(iter(matches))
+                return target_file, self._module_resolution(candidate, target_file)
             if len(matches) > 1:
                 self._mark_ambiguous_import(raw_target, source_file)
                 return None
@@ -296,38 +391,107 @@ class CodeGraph:
                 }
             )
             if len(matches) == 1:
-                return matches[0]
+                return matches[0], "inferred"
             if len(matches) > 1:
                 self._mark_ambiguous_import(raw_target, source_file)
         return None
 
-    def _resolve_callee(self, call_edge: CallEdge, source_file: str) -> tuple[str, str] | None:
-        """Resolve only a single local target; ambiguous calls deliberately remain unresolved."""
-        same_file = self._find_entity_matches(call_edge.callee, source_file)
-        if len(same_file) == 1:
-            return same_file[0]
-        if len(same_file) > 1:
-            self.analysis_coverage.call_edges_ambiguous += 1
-            return None
+    @staticmethod
+    def _module_resolution(candidate: str, target_file: str) -> str:
+        """Classify canonical imports as exact and convenience aliases as inferred."""
+        normalized = target_file.replace("\\", "/")
+        module_path = (
+            normalized.rsplit(".", 1)[0]
+            if "." in normalized.rsplit("/", 1)[-1]
+            else normalized
+        )
+        dotted_path = module_path.replace("/", ".")
+        exact_names = {module_path, dotted_path}
+        if module_path.endswith("/__init__"):
+            package_path = module_path[: -len("/__init__")]
+            exact_names.update({package_path, package_path.replace("/", ".")})
+        return "exact" if candidate in exact_names else "inferred"
 
-        imported_files = [
-            target
-            for target in self.graph.successors(source_file)
-            if self.graph.get_edge_data(source_file, target, {}).get("type") == "imports"
-        ]
-        matches = [
-            match
-            for imported_file in imported_files
-            for match in self._find_entity_matches(call_edge.callee, imported_file)
-        ]
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
+    def _resolve_callee(self, call_edge: CallEdge, source_file: str) -> tuple[str, str] | None:
+        """Resolve only a single lexical or imported target; ambiguous calls remain unresolved."""
+        callee_path = call_edge.callee_path or call_edge.callee
+        path_parts = [part for part in callee_path.split(".") if part]
+        local_receiver = len(path_parts) <= 1 or path_parts[0] in {"self", "cls", "this"}
+
+        if local_receiver:
+            scoped_matches = self._find_lexically_scoped_matches(call_edge, source_file)
+            if len(scoped_matches) == 1:
+                return scoped_matches[0]
+            if len(scoped_matches) > 1:
+                self.analysis_coverage.call_edges_ambiguous += 1
+                return None
+
+            same_file = self._find_entity_matches(call_edge.callee, source_file)
+            if len(same_file) == 1:
+                return same_file[0]
+            if len(same_file) > 1:
+                self.analysis_coverage.call_edges_ambiguous += 1
+                return None
+
+        imported_matches = self._find_import_bound_matches(source_file, path_parts)
+        if len(imported_matches) == 1:
+            return imported_matches[0]
+        if len(imported_matches) > 1:
             self.analysis_coverage.call_edges_ambiguous += 1
             return None
 
         self.analysis_coverage.call_edges_unresolved += 1
         return None
+
+    def _find_lexically_scoped_matches(
+        self, call_edge: CallEdge, source_file: str
+    ) -> list[tuple[str, str]]:
+        """Prefer nested function declarations that are visible from the caller's lexical scope."""
+        caller = self.entities.get(call_edge.caller.replace("\\", "/"))
+        if caller is None:
+            return []
+        parts = caller.name.split(".")
+        for depth in range(len(parts), 0, -1):
+            prefix = ".".join(parts[:depth])
+            parent = self.entities.get(f"{source_file}::{prefix}")
+            if parent is None or parent.type != "function":
+                continue
+            scoped_name = f"{prefix}.{call_edge.callee}"
+            matches = self._find_exact_entity_matches(scoped_name, source_file)
+            if matches:
+                return [(node_id, "exact") for node_id in matches]
+        return []
+
+    def _find_import_bound_matches(
+        self, source_file: str, path_parts: list[str]
+    ) -> list[tuple[str, str]]:
+        """Resolve only names bound by an import, never by scanning every imported file."""
+        if not path_parts:
+            return []
+        bindings = self._import_bindings.get(source_file, {}).get(path_parts[0], [])
+        matches: dict[str, str] = {}
+        for binding in bindings:
+            if len(path_parts) == 1:
+                if binding.exported_name is None:
+                    continue
+                target_name = binding.exported_name
+            else:
+                if binding.exported_name is not None:
+                    # Class/static-member and re-export semantics require type information.
+                    continue
+                target_name = path_parts[-1]
+
+            for node_id in self._find_exact_entity_matches(target_name, binding.target_file):
+                matches[node_id] = self._merge_resolution(matches.get(node_id), binding.resolution)
+        return [(node_id, resolution) for node_id, resolution in sorted(matches.items())]
+
+    def _find_exact_entity_matches(self, name: str, file_path: str) -> list[str]:
+        """Return entities with a full lexical-name match inside one module."""
+        return sorted(
+            node_id
+            for node_id, entity in self.entities.items()
+            if entity.type != "module" and entity.file_path == file_path and entity.name == name
+        )
 
     def _find_entity_matches(
         self, name: str, file_path: str | None = None

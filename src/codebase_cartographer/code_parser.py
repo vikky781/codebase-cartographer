@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import tree_sitter_javascript as tsjavascript
@@ -40,11 +40,13 @@ class ParsedFile:
 
 @dataclass
 class ImportEdge:
-    """Represent an import relationship between modules."""
+    """Represent an import relationship and its local bindings."""
 
     source_module: str
     target_module: str
     imported_names: list[str]
+    local_names: list[str] = field(default_factory=list)
+    is_from_import: bool = True
 
 
 @dataclass
@@ -54,6 +56,7 @@ class CallEdge:
     caller: str
     callee: str
     line: int
+    callee_path: str | None = None
 
 
 def _node_text(node: Node | None) -> str:
@@ -106,6 +109,36 @@ def _callee_name(call_node: Node) -> str:
         if descendant.type in {"identifier", "property_identifier", "field_identifier"}
     ]
     return _node_text(identifiers[-1]) if identifiers else _node_text(callable_node)
+
+
+def _callee_path(call_node: Node) -> str | None:
+    """Return a simple dotted callable path when static binding can use it safely."""
+    callable_node = call_node.child_by_field_name("function")
+    if callable_node is None and call_node.children:
+        callable_node = call_node.children[0]
+    candidate = _node_text(callable_node).strip()
+    if re.fullmatch(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*", candidate):
+        return candidate
+    return None
+
+
+def _lexical_name(
+    node: Node, declaration_types: set[str], declaration_name: str | None = None
+) -> str:
+    """Return a stable lexical name so nested declarations cannot collide in a graph."""
+    name = declaration_name or _entity_name(node)
+    if not name:
+        return ""
+
+    parts = [name]
+    parent = node.parent
+    while parent is not None:
+        if parent.type in declaration_types:
+            parent_name = _entity_name(parent)
+            if parent_name:
+                parts.append(parent_name)
+        parent = parent.parent
+    return ".".join(reversed(parts))
 
 
 def _source_module(file_path: str) -> str:
@@ -194,7 +227,7 @@ class PythonExtractor:
 
         for node in all_nodes:
             if node.type == "class_definition":
-                class_name = _entity_name(node)
+                class_name = _lexical_name(node, {"function_definition", "class_definition"})
                 if class_name:
                     entities.append(
                         CodeEntity(
@@ -213,8 +246,9 @@ class PythonExtractor:
                 if not function_name:
                     continue
 
-                class_name = self._containing_class_name(node)
-                qualified_name = f"{class_name}.{function_name}" if class_name else function_name
+                qualified_name = _lexical_name(
+                    node, {"function_definition", "class_definition"}, function_name
+                )
                 function_calls, function_edges = self._extract_calls(
                     node, file_path, qualified_name
                 )
@@ -239,18 +273,6 @@ class PythonExtractor:
         return entities, imports, calls
 
     @staticmethod
-    def _containing_class_name(node: Node) -> str | None:
-        """Return the enclosing class name unless another function intervenes."""
-        parent = node.parent
-        while parent is not None:
-            if parent.type == "function_definition":
-                return None
-            if parent.type == "class_definition":
-                return _entity_name(parent) or None
-            parent = parent.parent
-        return None
-
-    @staticmethod
     def _extract_calls(
         node: Node, file_path: str, function_name: str
     ) -> tuple[list[str], list[CallEdge]]:
@@ -267,7 +289,14 @@ class PythonExtractor:
             if not callee:
                 continue
             call_names.append(callee)
-            edges.append(CallEdge(caller=caller, callee=callee, line=descendant.start_point[0] + 1))
+            edges.append(
+                CallEdge(
+                    caller=caller,
+                    callee=callee,
+                    line=descendant.start_point[0] + 1,
+                    callee_path=_callee_path(descendant),
+                )
+            )
         return call_names, edges
 
     @staticmethod
@@ -287,8 +316,8 @@ class PythonExtractor:
         from_match = re.match(r"^from\s+(\S+)\s+import\s+(.+)$", source, re.DOTALL)
         if from_match:
             target = from_match.group(1)
-            names = [
-                name.strip().split(" as ", 1)[0]
+            bindings = [
+                PythonExtractor._import_binding(name)
                 for name in from_match.group(2).replace("(", "").replace(")", "").split(",")
                 if name.strip()
             ]
@@ -296,22 +325,40 @@ class PythonExtractor:
                 ImportEdge(
                     source_module=source_module,
                     target_module=target,
-                    imported_names=names,
+                    imported_names=[imported for imported, _ in bindings],
+                    local_names=[local for _, local in bindings],
                 )
             ]
 
         import_match = re.match(r"^import\s+(.+)$", source, re.DOTALL)
         if import_match:
-            names = [
-                name.strip().split(" as ", 1)[0]
+            bindings = [
+                PythonExtractor._import_binding(name, module_binding=True)
                 for name in import_match.group(1).split(",")
                 if name.strip()
             ]
             return [
-                ImportEdge(source_module=source_module, target_module=name, imported_names=[name])
-                for name in names
+                ImportEdge(
+                    source_module=source_module,
+                    target_module=imported,
+                    imported_names=[imported],
+                    local_names=[local],
+                    is_from_import=False,
+                )
+                for imported, local in bindings
             ]
         return []
+
+    @staticmethod
+    def _import_binding(token: str, module_binding: bool = False) -> tuple[str, str]:
+        """Return the imported name and the name bound in the local Python module."""
+        parts = re.split(r"\s+as\s+", token.strip(), maxsplit=1)
+        imported = parts[0].strip()
+        if len(parts) == 2:
+            return imported, parts[1].strip()
+        if module_binding:
+            return imported, imported.split(".", 1)[0]
+        return imported, imported
 
 
 class JavaScriptExtractor:
@@ -330,7 +377,15 @@ class JavaScriptExtractor:
 
         for node in all_nodes:
             if node.type == "class_declaration":
-                class_name = _entity_name(node)
+                class_name = _lexical_name(
+                    node,
+                    {
+                        "function_declaration",
+                        "arrow_function",
+                        "method_definition",
+                        "class_declaration",
+                    },
+                )
                 if class_name:
                     entities.append(
                         CodeEntity(
@@ -346,8 +401,16 @@ class JavaScriptExtractor:
         for node in all_nodes:
             function_name = self._function_name(node)
             if function_name:
-                class_name = self._containing_class_name(node)
-                qualified_name = f"{class_name}.{function_name}" if class_name else function_name
+                qualified_name = _lexical_name(
+                    node,
+                    {
+                        "function_declaration",
+                        "arrow_function",
+                        "method_definition",
+                        "class_declaration",
+                    },
+                    function_name,
+                )
                 function_calls, function_edges = self._extract_calls(
                     node, file_path, qualified_name
                 )
@@ -384,18 +447,6 @@ class JavaScriptExtractor:
         return _entity_name(node.parent) or None
 
     @staticmethod
-    def _containing_class_name(node: Node) -> str | None:
-        """Return the enclosing class name unless a nested function intervenes."""
-        parent = node.parent
-        while parent is not None:
-            if parent.type in {"function_declaration", "arrow_function", "method_definition"}:
-                return None
-            if parent.type == "class_declaration":
-                return _entity_name(parent) or None
-            parent = parent.parent
-        return None
-
-    @staticmethod
     def _extract_calls(
         node: Node, file_path: str, function_name: str
     ) -> tuple[list[str], list[CallEdge]]:
@@ -412,7 +463,14 @@ class JavaScriptExtractor:
             if not callee:
                 continue
             call_names.append(callee)
-            edges.append(CallEdge(caller=caller, callee=callee, line=descendant.start_point[0] + 1))
+            edges.append(
+                CallEdge(
+                    caller=caller,
+                    callee=callee,
+                    line=descendant.start_point[0] + 1,
+                    callee_path=_callee_path(descendant),
+                )
+            )
         return call_names, edges
 
     @staticmethod
@@ -436,22 +494,32 @@ class JavaScriptExtractor:
 
         target = match.group(1)
         imported_names: list[str] = []
+        local_names: list[str] = []
+        is_from_import = False
         names_match = re.search(r"\{([^}]+)\}", statement)
         if names_match:
-            imported_names.extend(
-                name.strip().split(" as ")[-1]
-                for name in names_match.group(1).split(",")
-                if name.strip()
-            )
+            is_from_import = True
+            for name in names_match.group(1).split(","):
+                parts = re.split(r"\s+as\s+", name.strip(), maxsplit=1)
+                if not parts or not parts[0]:
+                    continue
+                imported_names.append(parts[0])
+                local_names.append(parts[-1])
         else:
             default_match = re.match(r"^import\s+([\w$]+)", statement)
             if default_match:
                 imported_names.append(default_match.group(1))
+                local_names.append(default_match.group(1))
+            namespace_match = re.match(r"^import\s+\*\s+as\s+([\w$]+)", statement)
+            if namespace_match:
+                local_names.append(namespace_match.group(1))
 
         return ImportEdge(
             source_module=source_module,
             target_module=target,
             imported_names=imported_names,
+            local_names=local_names,
+            is_from_import=is_from_import,
         )
 
 
