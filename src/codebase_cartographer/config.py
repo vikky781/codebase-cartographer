@@ -116,7 +116,7 @@ class AppConfig:
     centrality_sample_nodes: int = 100
     cache_dir_name: str = ".cartographer_cache"
     cache_file_name: str = "graph_cache.json"
-    cache_schema_version: int = 1
+    cache_schema_version: int = 2
 
     def get_cache_path(self, repo_path: str | Path) -> Path:
         """Return the cache file path for a repository."""

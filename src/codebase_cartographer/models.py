@@ -17,7 +17,13 @@ class CodeEntity(BaseModel):
         default=None,
         description="Full signature e.g. 'def login(username: str, password: str) -> Token'",
     )
-    complexity: int = Field(default=0, description="Lines of code + max nesting depth")
+    complexity: int = Field(
+        default=0,
+        description=(
+            "Static line-span size estimate for Tree-sitter entities; 0 means unavailable "
+            "for regex-fallback entities"
+        ),
+    )
     calls: list[str] = Field(default_factory=list, description="Names of entities this calls")
     called_by: list[str] = Field(
         default_factory=list, description="Names of entities that call this"
@@ -41,6 +47,37 @@ class EdgeCounts(BaseModel):
 
     calls: int = 0
     imports: int = 0
+
+
+class AnalysisCoverage(BaseModel):
+    """Describe the fidelity and relationship-resolution coverage of an analysis."""
+
+    tree_sitter_files: int = Field(
+        default=0, description="Files parsed with a language-specific Tree-sitter grammar"
+    )
+    regex_fallback_files: int = Field(
+        default=0,
+        description="Files inventoried with regex fallback; they do not contribute call edges",
+    )
+    syntax_recovery_files: int = Field(
+        default=0,
+        description=(
+            "Tree-sitter files containing syntax errors from which partial results were recovered"
+        ),
+    )
+    call_edges_observed: int = Field(default=0, description="Call expressions observed in AST data")
+    call_edges_resolved: int = Field(
+        default=0, description="Observed calls resolved to one unambiguous local entity"
+    )
+    call_edges_unresolved: int = Field(
+        default=0, description="Observed calls with no local graph target"
+    )
+    call_edges_ambiguous: int = Field(
+        default=0, description="Observed calls with multiple plausible local graph targets"
+    )
+    import_edges_ambiguous: int = Field(
+        default=0, description="Imports with multiple plausible local module targets"
+    )
 
 
 class HealthSummary(BaseModel):
@@ -79,6 +116,10 @@ class AnalyzeOutput(BaseModel):
         description="Inferred architectural layers like routes, services, models",
     )
     health: HealthSummary = Field(default_factory=HealthSummary)
+    coverage: AnalysisCoverage = Field(
+        default_factory=AnalysisCoverage,
+        description="Parsing fidelity and relationship-resolution coverage for this analysis",
+    )
     repo_hash: str = Field(default="", description="Git HEAD SHA for cache validation")
     warnings: list[str] = Field(
         default_factory=list, description="Non-fatal warnings like skipped files"
@@ -100,6 +141,14 @@ class TraceStep(BaseModel):
     entity: CodeEntity
     relationship: Literal["calls", "imports", "inherits"]
     source: str = "tree-sitter-ast"
+    resolution: Literal["exact", "inferred"] = Field(
+        default="inferred",
+        description="Whether the relationship was exact or inferred from a unique local candidate",
+    )
+    source_lines: list[int] = Field(
+        default_factory=list,
+        description="Source lines that contributed this relationship when available",
+    )
 
 
 class TraceInput(BaseModel):

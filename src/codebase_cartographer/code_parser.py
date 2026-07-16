@@ -35,6 +35,7 @@ class ParsedFile:
     calls: list[CallEdge]
     parse_method: str
     error: str | None = None
+    syntax_recovered: bool = False
 
 
 @dataclass
@@ -657,6 +658,7 @@ def parse_repository(
         extension = file_info["extension"]
         language = config.get_language_for_extension(extension)
         parse_method = "tree-sitter" if language else "regex-fallback"
+        syntax_recovered = False
 
         try:
             source_bytes = Path(file_info["abs_path"]).read_bytes()
@@ -687,7 +689,8 @@ def parse_repository(
                     warnings.append(message)
                     continue
 
-                if root_node.has_error:
+                syntax_recovered = root_node.has_error
+                if syntax_recovered:
                     warnings.append(
                         f"Tree-sitter recovered from syntax errors in {file_path}; "
                         "results may be incomplete."
@@ -727,6 +730,7 @@ def parse_repository(
                     imports=imports,
                     calls=calls,
                     parse_method=parse_method,
+                    syntax_recovered=syntax_recovered,
                 )
             )
         except Exception as exc:

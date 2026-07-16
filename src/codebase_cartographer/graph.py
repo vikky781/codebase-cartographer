@@ -14,6 +14,7 @@ from .code_parser import CallEdge, ParsedFile
 from .config import ENTRY_POINT_PATTERNS, get_config
 from .git_analyzer import GitAnalyzer
 from .models import (
+    AnalysisCoverage,
     CodeEntity,
     EdgeCounts,
     EntityCounts,
@@ -37,6 +38,7 @@ class _GraphCache:
     repo_hash: str = ""
     entities: dict[str, dict] = field(default_factory=dict)
     modules: dict[str, str] = field(default_factory=dict)
+    analysis_coverage: dict[str, int] = field(default_factory=dict)
 
 
 class CodeGraph:
@@ -47,6 +49,9 @@ class CodeGraph:
         self.graph: nx.DiGraph = nx.DiGraph()
         self.entities: dict[str, CodeEntity] = {}
         self.modules: dict[str, str] = {}
+        self._module_aliases: dict[str, set[str]] = defaultdict(set)
+        self.analysis_coverage = AnalysisCoverage()
+        self._ambiguous_imports: set[tuple[str, str]] = set()
         self.repo_path: str = ""
         self.repo_hash: str = ""
         self.is_built: bool = False
@@ -59,6 +64,19 @@ class CodeGraph:
         self.graph.clear()
         self.entities.clear()
         self.modules.clear()
+        self._module_aliases.clear()
+        self.analysis_coverage = AnalysisCoverage(
+            tree_sitter_files=sum(
+                parsed_file.parse_method == "tree-sitter" for parsed_file in parsed_files
+            ),
+            regex_fallback_files=sum(
+                parsed_file.parse_method == "regex-fallback" for parsed_file in parsed_files
+            ),
+            syntax_recovery_files=sum(
+                parsed_file.syntax_recovered for parsed_file in parsed_files
+            ),
+        )
+        self._ambiguous_imports.clear()
         self.repo_path = str(Path(repo_path).resolve())
         self.repo_hash = repo_hash
         self.is_built = False
@@ -86,6 +104,7 @@ class CodeGraph:
                 line_start=module_entity.line_start,
                 line_end=module_entity.line_end,
                 signature=module_entity.signature,
+                source=module_entity.source,
             )
             self.entities[file_path] = module_entity
             self._register_module_aliases(file_path)
@@ -107,11 +126,17 @@ class CodeGraph:
                     line_start=entity.line_start,
                     line_end=entity.line_end,
                     signature=entity.signature,
+                    source=entity.source,
                 )
 
         # Step C: module-to-module import edges.
         for parsed_file in parsed_files:
             source_file = parsed_file.file_path.replace("\\", "/")
+            extraction_source = (
+                "tree-sitter-ast"
+                if parsed_file.parse_method == "tree-sitter"
+                else "regex-fallback"
+            )
             for import_edge in parsed_file.imports:
                 target_file = self._resolve_module(import_edge.target_module, source_file)
                 if target_file is None and import_edge.target_module.strip(".") == "":
@@ -123,18 +148,38 @@ class CodeGraph:
                         if target_file is not None:
                             break
                 if target_file is not None:
-                    self._add_counted_edge(source_file, target_file, "imports")
+                    self._add_counted_edge(
+                        source_file,
+                        target_file,
+                        "imports",
+                        edge_source=extraction_source,
+                    )
 
         # Step D: function/class call edges, resolved locally before imported modules.
         for parsed_file in parsed_files:
             source_file = parsed_file.file_path.replace("\\", "/")
+            extraction_source = (
+                "tree-sitter-ast"
+                if parsed_file.parse_method == "tree-sitter"
+                else "regex-fallback"
+            )
             for call_edge in parsed_file.calls:
                 caller = call_edge.caller.replace("\\", "/")
                 if caller not in self.entities:
                     continue
-                callee = self._resolve_callee(call_edge, source_file)
-                if callee is not None:
-                    self._add_counted_edge(caller, callee, "calls")
+                self.analysis_coverage.call_edges_observed += 1
+                resolved = self._resolve_callee(call_edge, source_file)
+                if resolved is not None:
+                    callee, resolution = resolved
+                    self.analysis_coverage.call_edges_resolved += 1
+                    self._add_counted_edge(
+                        caller,
+                        callee,
+                        "calls",
+                        edge_source=extraction_source,
+                        resolution=resolution,
+                        source_line=call_edge.line,
+                    )
 
         self.is_built = True
 
@@ -167,7 +212,18 @@ class CodeGraph:
 
         for alias in aliases:
             if alias:
-                self.modules.setdefault(alias, normalized)
+                self._module_aliases[alias].add(normalized)
+                matches = self._module_aliases[alias]
+                if len(matches) == 1:
+                    self.modules[alias] = normalized
+                else:
+                    # A short alias such as ``utils`` is unsafe when more than one file owns it.
+                    self.modules.pop(alias, None)
+
+    def _mark_ambiguous_import(self, import_target: str, source_file: str) -> None:
+        """Record one ambiguous import without inflating the count during candidate expansion."""
+        self._ambiguous_imports.add((source_file, import_target))
+        self.analysis_coverage.import_edges_ambiguous = len(self._ambiguous_imports)
 
     def _resolve_module(self, import_target: str, source_file: str) -> str | None:
         """Resolve an import target to a module file path in the built graph."""
@@ -222,42 +278,61 @@ class CodeGraph:
             )
 
         for candidate in expanded_candidates:
-            resolved = self.modules.get(candidate)
-            if resolved is not None:
-                return resolved
+            matches = self._module_aliases.get(candidate, set())
+            if len(matches) == 1:
+                return next(iter(matches))
+            if len(matches) > 1:
+                self._mark_ambiguous_import(raw_target, source_file)
+                return None
 
         target_tail = cleaned.replace("/", ".").strip(".")
         if target_tail:
             matches = sorted(
                 {
                     file_path
-                    for module_name, file_path in self.modules.items()
+                    for module_name, file_paths in self._module_aliases.items()
                     if module_name.replace("/", ".").endswith(target_tail)
+                    for file_path in file_paths
                 }
             )
-            if matches:
+            if len(matches) == 1:
                 return matches[0]
+            if len(matches) > 1:
+                self._mark_ambiguous_import(raw_target, source_file)
         return None
 
-    def _resolve_callee(self, call_edge: CallEdge, source_file: str) -> str | None:
-        """Resolve a simple call name first locally, then through imported modules."""
-        same_file = self._find_entity_by_name(call_edge.callee, source_file)
-        if same_file is not None:
-            return same_file
+    def _resolve_callee(self, call_edge: CallEdge, source_file: str) -> tuple[str, str] | None:
+        """Resolve only a single local target; ambiguous calls deliberately remain unresolved."""
+        same_file = self._find_entity_matches(call_edge.callee, source_file)
+        if len(same_file) == 1:
+            return same_file[0]
+        if len(same_file) > 1:
+            self.analysis_coverage.call_edges_ambiguous += 1
+            return None
 
         imported_files = [
             target
             for target in self.graph.successors(source_file)
             if self.graph.get_edge_data(source_file, target, {}).get("type") == "imports"
         ]
-        for imported_file in imported_files:
-            resolved = self._find_entity_by_name(call_edge.callee, imported_file)
-            if resolved is not None:
-                return resolved
+        matches = [
+            match
+            for imported_file in imported_files
+            for match in self._find_entity_matches(call_edge.callee, imported_file)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            self.analysis_coverage.call_edges_ambiguous += 1
+            return None
+
+        self.analysis_coverage.call_edges_unresolved += 1
         return None
 
-    def _find_entity_by_name(self, name: str, file_path: str | None = None) -> str | None:
-        """Find the most specific function or class node matching a name."""
+    def _find_entity_matches(
+        self, name: str, file_path: str | None = None
+    ) -> list[tuple[str, str]]:
+        """Return candidate entities and their resolution fidelity without selecting arbitrarily."""
         exact_matches: list[str] = []
         terminal_matches: list[str] = []
         for node_id, entity in self.entities.items():
@@ -268,18 +343,42 @@ class CodeGraph:
             elif entity.name.rsplit(".", 1)[-1] == name:
                 terminal_matches.append(node_id)
         if exact_matches:
-            return sorted(exact_matches)[0]
+            return [(node_id, "exact") for node_id in sorted(exact_matches)]
         if terminal_matches:
-            return sorted(terminal_matches)[0]
-        return None
+            return [(node_id, "inferred") for node_id in sorted(terminal_matches)]
+        return []
 
-    def _add_counted_edge(self, source: str, target: str, edge_type: str) -> None:
-        """Add an edge while retaining repeated relationships in a DiGraph count attribute."""
+    def _add_counted_edge(
+        self,
+        source: str,
+        target: str,
+        edge_type: str,
+        *,
+        edge_source: str = "tree-sitter-ast",
+        resolution: str = "exact",
+        source_line: int | None = None,
+    ) -> None:
+        """Add an edge while retaining count, provenance, and bounded source-line evidence."""
         existing = self.graph.get_edge_data(source, target)
         if existing is not None and existing.get("type") == edge_type:
             existing["count"] = int(existing.get("count", 1)) + 1
+            if existing.get("resolution") != resolution:
+                existing["resolution"] = "inferred"
+            if source_line is not None:
+                source_lines = existing.setdefault("source_lines", [])
+                if isinstance(source_lines, list) and source_line not in source_lines:
+                    source_lines.append(source_line)
+                    del source_lines[20:]
             return
-        self.graph.add_edge(source, target, type=edge_type, count=1)
+        self.graph.add_edge(
+            source,
+            target,
+            type=edge_type,
+            count=1,
+            source=edge_source,
+            resolution=resolution,
+            source_lines=[source_line] if source_line is not None else [],
+        )
 
     def search(
         self, query: str, entity_type: str | None = None, limit: int = 20
@@ -357,11 +456,11 @@ class CodeGraph:
             index += 1
             neighbors = self._trace_neighbors(current, direction)
             if depth >= max_depth:
-                if any(neighbor not in visited for neighbor, _ in neighbors):
+                if any(neighbor not in visited for neighbor, _, _ in neighbors):
                     truncated = True
                 continue
 
-            for neighbor, relationship in neighbors:
+            for neighbor, relationship, metadata in neighbors:
                 if neighbor in visited:
                     continue
                 visited.add(neighbor)
@@ -374,7 +473,17 @@ class CodeGraph:
                         depth=depth + 1,
                         entity=entity.model_copy(deep=True),
                         relationship=relationship,
-                        source=entity.source,
+                        source=str(metadata.get("source", entity.source)),
+                        resolution=(
+                            "exact"
+                            if metadata.get("resolution") == "exact"
+                            else "inferred"
+                        ),
+                        source_lines=[
+                            line
+                            for line in metadata.get("source_lines", [])
+                            if isinstance(line, int)
+                        ],
                     )
                 )
                 if len(steps) >= config.max_trace_steps:
@@ -402,17 +511,19 @@ class CodeGraph:
         ]
         return sorted(fuzzy)[0] if fuzzy else None
 
-    def _trace_neighbors(self, node_id: str, direction: str) -> list[tuple[str, str]]:
+    def _trace_neighbors(
+        self, node_id: str, direction: str
+    ) -> list[tuple[str, str, dict[str, object]]]:
         """Return neighboring nodes with the relationship traversed to reach them."""
-        neighbors: list[tuple[str, str]] = []
+        neighbors: list[tuple[str, str, dict[str, object]]] = []
         if direction in {"forward", "both"}:
             neighbors.extend(
-                (target, str(data.get("type", "calls")))
+                (target, str(data.get("type", "calls")), dict(data))
                 for _, target, data in self.graph.out_edges(node_id, data=True)
             )
         if direction in {"backward", "both"}:
             neighbors.extend(
-                (source, str(data.get("type", "calls")))
+                (source, str(data.get("type", "calls")), dict(data))
                 for source, _, data in self.graph.in_edges(node_id, data=True)
             )
         return neighbors
@@ -828,6 +939,10 @@ class CodeGraph:
             ),
         )
 
+    def get_analysis_coverage(self) -> AnalysisCoverage:
+        """Return a detached snapshot of parser and relationship-resolution coverage."""
+        return self.analysis_coverage.model_copy(deep=True)
+
     def get_health_summary(self) -> HealthSummary:
         """Compute aggregate graph and structural health indicators."""
         complexity_scores = [
@@ -929,6 +1044,7 @@ class CodeGraph:
                     for node_id, entity in self.entities.items()
                 },
                 modules=dict(self.modules),
+                analysis_coverage=self.analysis_coverage.model_dump(mode="json"),
                 schema_version=config.cache_schema_version,
             )
             payload = {
@@ -938,6 +1054,7 @@ class CodeGraph:
                 "repo_hash": cache.repo_hash,
                 "entities": cache.entities,
                 "modules": cache.modules,
+                "analysis_coverage": cache.analysis_coverage,
             }
             with NamedTemporaryFile(
                 mode="w",
@@ -985,9 +1102,12 @@ class CodeGraph:
             cached_nodes = payload.get("nodes")
             cached_edges = payload.get("edges")
             cached_entities = payload.get("entities")
+            cached_coverage = payload.get("analysis_coverage")
             if not isinstance(cached_nodes, list) or not isinstance(cached_edges, list):
                 return False
             if not isinstance(cached_entities, dict):
+                return False
+            if not isinstance(cached_coverage, dict):
                 return False
 
             rebuilt_graph = nx.DiGraph()
@@ -1014,24 +1134,15 @@ class CodeGraph:
             }
             if any(node_id not in rebuilt_graph for node_id in rebuilt_entities):
                 return False
-            cached_modules = payload.get("modules", {})
-            if not isinstance(cached_modules, dict):
-                return False
-
             self.graph = rebuilt_graph
             self.entities = rebuilt_entities
-            self.modules = {
-                str(alias): str(path)
-                for alias, path in cached_modules.items()
-                if isinstance(alias, str)
-                and isinstance(path, str)
-                and path in self.graph
-                and self.graph.nodes[path].get("type") == "module"
-            }
-            if not self.modules:
-                for node_id, attributes in self.graph.nodes(data=True):
-                    if attributes.get("type") == "module":
-                        self._register_module_aliases(str(attributes.get("file_path", node_id)))
+            self.modules.clear()
+            self._module_aliases.clear()
+            for node_id, attributes in self.graph.nodes(data=True):
+                if attributes.get("type") == "module":
+                    self._register_module_aliases(str(attributes.get("file_path", node_id)))
+            self.analysis_coverage = AnalysisCoverage.model_validate(cached_coverage)
+            self._ambiguous_imports.clear()
             self.repo_path = str(Path(repo_path).resolve())
             self.repo_hash = cached_hash
             self.is_built = True

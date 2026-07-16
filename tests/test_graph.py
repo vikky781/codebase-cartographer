@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from codebase_cartographer.code_parser import CallEdge, ImportEdge, ParsedFile
 from codebase_cartographer.config import get_config
 from codebase_cartographer.graph import CodeGraph
 from codebase_cartographer.models import CodeEntity
@@ -176,6 +177,138 @@ class TestTrace:
         result = graph.trace("caller")
 
         assert result.steps[0].source == "regex-fallback"
+
+    def test_trace_includes_resolution_and_source_line_evidence(self):
+        """A resolved trace must explain why it is in the graph and where it came from."""
+        graph = CodeGraph()
+        caller = CodeEntity(
+            name="caller",
+            type="function",
+            file_path="single.py",
+            line_start=1,
+            line_end=2,
+        )
+        callee = CodeEntity(
+            name="callee",
+            type="function",
+            file_path="single.py",
+            line_start=4,
+            line_end=5,
+        )
+        graph.build(
+            [
+                ParsedFile(
+                    file_path="single.py",
+                    language="python",
+                    entities=[caller, callee],
+                    imports=[],
+                    calls=[CallEdge(caller="single.py::caller", callee="callee", line=2)],
+                    parse_method="tree-sitter",
+                )
+            ],
+            repo_path=str(Path.cwd()),
+            repo_hash="",
+        )
+
+        result = graph.trace("caller")
+
+        assert result.steps[0].resolution == "exact"
+        assert result.steps[0].source_lines == [2]
+
+
+class TestAmbiguousResolution:
+    @staticmethod
+    def _function(name: str, file_path: str) -> CodeEntity:
+        return CodeEntity(
+            name=name,
+            type="function",
+            file_path=file_path,
+            line_start=1,
+            line_end=1,
+        )
+
+    def test_ambiguous_call_targets_are_not_connected(self):
+        """Duplicate imported names must be counted as ambiguous, never selected by sort order."""
+        graph = CodeGraph()
+        graph.build(
+            [
+                ParsedFile(
+                    file_path="caller.py",
+                    language="python",
+                    entities=[self._function("caller", "caller.py")],
+                    imports=[
+                        ImportEdge("caller", "first", ["run"]),
+                        ImportEdge("caller", "second", ["run"]),
+                    ],
+                    calls=[CallEdge("caller.py::caller", "run", 3)],
+                    parse_method="tree-sitter",
+                ),
+                ParsedFile(
+                    file_path="first.py",
+                    language="python",
+                    entities=[self._function("run", "first.py")],
+                    imports=[],
+                    calls=[],
+                    parse_method="tree-sitter",
+                ),
+                ParsedFile(
+                    file_path="second.py",
+                    language="python",
+                    entities=[self._function("run", "second.py")],
+                    imports=[],
+                    calls=[],
+                    parse_method="tree-sitter",
+                ),
+            ],
+            repo_path=str(Path.cwd()),
+            repo_hash="",
+        )
+
+        coverage = graph.get_analysis_coverage()
+
+        assert not graph.graph.has_edge("caller.py::caller", "first.py::run")
+        assert not graph.graph.has_edge("caller.py::caller", "second.py::run")
+        assert coverage.call_edges_observed == 1
+        assert coverage.call_edges_resolved == 0
+        assert coverage.call_edges_ambiguous == 1
+
+    def test_ambiguous_module_aliases_are_not_imported(self):
+        """A shared short module alias must not select an arbitrary file path."""
+        graph = CodeGraph()
+        graph.build(
+            [
+                ParsedFile(
+                    file_path="caller.py",
+                    language="python",
+                    entities=[],
+                    imports=[ImportEdge("caller", "shared", [])],
+                    calls=[],
+                    parse_method="tree-sitter",
+                ),
+                ParsedFile(
+                    file_path="one/shared.py",
+                    language="python",
+                    entities=[],
+                    imports=[],
+                    calls=[],
+                    parse_method="tree-sitter",
+                ),
+                ParsedFile(
+                    file_path="two/shared.py",
+                    language="python",
+                    entities=[],
+                    imports=[],
+                    calls=[],
+                    parse_method="tree-sitter",
+                ),
+            ],
+            repo_path=str(Path.cwd()),
+            repo_hash="",
+        )
+
+        assert not graph.graph.has_edge("caller.py", "one/shared.py")
+        assert not graph.graph.has_edge("caller.py", "two/shared.py")
+        assert graph.get_analysis_coverage().import_edges_ambiguous == 1
 
 
 class TestHealthSummary:

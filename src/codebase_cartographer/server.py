@@ -14,6 +14,7 @@ from .git_analyzer import GitAnalyzer
 from .graph import CodeGraph, get_graph
 from .issue_detector import IssueDetector
 from .models import (
+    AnalysisCoverage,
     AnalyzeInput,
     AnalyzeOutput,
     CodeEntity,
@@ -102,6 +103,7 @@ def _reset_analysis_state() -> None:
         graph._pagerank_cache = None
         graph._centrality_cache = None
         graph._communities_cache = None
+        graph.analysis_coverage = AnalysisCoverage()
     except Exception:
         # Error handling must never turn a failed tool request into a server crash.
         return
@@ -277,6 +279,22 @@ def analyze_repo(repo_path: str, scope: str | None = None) -> str:
         entity_counts: EntityCounts = graph.get_entity_counts()
         edge_counts: EdgeCounts = graph.get_edge_counts()
         health: HealthSummary = graph.get_health_summary()
+        coverage = graph.get_analysis_coverage()
+        if coverage.regex_fallback_files:
+            warnings.append(
+                f"{coverage.regex_fallback_files} file(s) used regex fallback: declaration and "
+                "import inventory only; no call-graph or complexity evidence was produced."
+            )
+        if coverage.call_edges_ambiguous:
+            warnings.append(
+                f"{coverage.call_edges_ambiguous} call edge(s) were left unresolved because "
+                "multiple local targets were plausible."
+            )
+        if coverage.import_edges_ambiguous:
+            warnings.append(
+                f"{coverage.import_edges_ambiguous} import edge(s) were left unresolved because "
+                "multiple local modules were plausible."
+            )
         output = AnalyzeOutput(
             files_analyzed=entity_counts.modules,
             languages=_language_counts(graph),
@@ -284,6 +302,7 @@ def analyze_repo(repo_path: str, scope: str | None = None) -> str:
             edges=edge_counts,
             detected_layers=graph.detect_layers(),
             health=health,
+            coverage=coverage,
             repo_hash=graph.repo_hash or repo_hash,
             warnings=warnings,
         )

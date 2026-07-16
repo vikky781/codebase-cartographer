@@ -175,6 +175,7 @@ class TestParseRepository:
         parsed_files, warnings = parse_repository(local_tmp_path)
 
         assert len(parsed_files) == 1
+        assert parsed_files[0].syntax_recovered is True
         assert any("recovered from syntax errors" in warning for warning in warnings)
 
     @pytest.mark.parametrize(
