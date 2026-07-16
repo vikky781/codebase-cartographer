@@ -81,6 +81,28 @@ class TestDeadCode:
         # At least some dead code should be found
         assert len(dead) > 0, "Expected to find dead code in the fixture"
 
+    def test_ignores_regex_fallback_entities_for_dead_code_candidates(self):
+        """Fallback declarations lack call evidence and must not become false-positive issues."""
+        graph = CodeGraph()
+        fallback_entity = CodeEntity(
+            name="legacy_handler",
+            type="function",
+            file_path="Legacy.java",
+            line_start=1,
+            line_end=1,
+            source="regex-fallback",
+        )
+        graph.entities["Legacy.java::legacy_handler"] = fallback_entity
+        graph.graph.add_node(
+            "Legacy.java::legacy_handler",
+            type="function",
+            file_path="Legacy.java",
+            name="legacy_handler",
+            source="regex-fallback",
+        )
+
+        assert graph.find_dead_code() == []
+
 
 class TestGodClasses:
     def test_detection_runs(self, built_graph):

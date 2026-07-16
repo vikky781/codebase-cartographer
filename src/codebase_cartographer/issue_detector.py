@@ -100,14 +100,15 @@ class IssueDetector:
                         type="dead_code",
                         severity=severity,
                         description=(
-                            f"Dead code: {len(entities)} unused function(s)/class(es) in "
+                            f"Potential dead code: {len(entities)} function(s)/class(es) with "
+                            "no inbound static call edge in "
                             f"{file_path}: {names}"
                         ),
                         entities=entities,
                         file_paths=[file_path],
                         suggestion=(
-                            "Verify these are not called via dynamic dispatch or reflection, "
-                            "then consider removing them."
+                            "Verify framework wiring, dynamic dispatch, reflection, and external "
+                            "entry points before considering removal."
                         ),
                         source="networkx-indegree",
                     )
@@ -128,7 +129,8 @@ class IssueDetector:
                         type="god_class",
                         severity="high" if total > 20 else "medium",
                         description=(
-                            f"God class '{entity.name}' in {entity.file_path}: {fan_in} "
+                            f"High-coupling class candidate '{entity.name}' in "
+                            f"{entity.file_path}: {fan_in} "
                             f"dependents, {fan_out} dependencies (total coupling: {total})"
                         ),
                         entities=[entity],
@@ -156,14 +158,16 @@ class IssueDetector:
                         type="bottleneck",
                         severity="high" if result.score > 0.3 else "medium",
                         description=(
-                            f"Bottleneck: '{result.entity_name}' has high betweenness centrality "
+                            f"Potential bottleneck: '{result.entity_name}' has high betweenness "
+                            "centrality "
                             f"({result.score:.3f}). Many paths through the codebase go through "
                             "this module."
                         ),
                         file_paths=[result.file_path],
                         suggestion=(
-                            "This module is a single point of failure. Consider splitting "
-                            "responsibilities or introducing abstractions to reduce its centrality."
+                            "This module may be a structural bridge. Validate runtime traffic, "
+                            "then consider splitting responsibilities or introducing abstractions "
+                            "to reduce centrality."
                         ),
                         source="networkx-centrality",
                     )
@@ -187,10 +191,10 @@ class IssueDetector:
             return [
                 Issue(
                     type="orphan_file",
-                    severity="low",
-                    description=(
-                        f"Found {len(orphans)} orphan file(s) not imported by any other module: "
-                        f"{listed_names}"
+                        severity="low",
+                        description=(
+                            f"Found {len(orphans)} potential orphan file(s) not imported by "
+                            f"another static module: {listed_names}"
                     ),
                     file_paths=orphans,
                     suggestion=(
@@ -219,7 +223,7 @@ class IssueDetector:
                         type="high_coupling",
                         severity="high" if result.score > 10 else "medium",
                         description=(
-                            f"High coupling between {result.entity_name}: "
+                            f"High static coupling candidate between {result.entity_name}: "
                             f"{int(result.score)} cross-references"
                         ),
                         file_paths=file_paths,

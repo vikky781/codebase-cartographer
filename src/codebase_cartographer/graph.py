@@ -836,6 +836,8 @@ class CodeGraph:
         for node_id, entity in self.entities.items():
             if entity.type not in {"function", "class"}:
                 continue
+            if entity.source == "regex-fallback":
+                continue
             if self.graph.in_degree(node_id) == 0 and not self._is_entry_point(entity.name):
                 dead_entities.append(entity)
         return dead_entities
@@ -859,7 +861,7 @@ class CodeGraph:
         threshold = get_config().god_class_fan_threshold
         results: list[tuple[CodeEntity, int, int]] = []
         for node_id, entity in self.entities.items():
-            if entity.type != "class":
+            if entity.type != "class" or entity.source == "regex-fallback":
                 continue
             class_members = {
                 node_id,
@@ -901,6 +903,8 @@ class CodeGraph:
         orphan_files: list[str] = []
         for node_id, attributes in self.graph.nodes(data=True):
             if attributes.get("type") != "module":
+                continue
+            if attributes.get("source") == "regex-fallback":
                 continue
             incoming_imports = sum(
                 1

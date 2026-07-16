@@ -20,6 +20,7 @@ class TestIssueDetector:
     def test_finds_dead_code(self, detector):
         issues = detector.detect_all(issue_types=["dead_code"])
         assert len(issues) > 0, "Expected dead code issues"
+        assert all("potential dead code" in issue.description.casefold() for issue in issues)
 
     def test_finds_orphan_files(self, detector):
         issues = detector.detect_all(issue_types=["orphan_file"])
