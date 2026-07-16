@@ -17,6 +17,7 @@ Install the runtime first. `pipx` is recommended because it makes the launcher a
 
 ```bash
 pipx install "git+https://github.com/vikky781/codebase-cartographer.git"
+python -c "import shutil; assert shutil.which('cartographer-mcp'), 'cartographer-mcp is not on PATH'"
 ```
 
 If a desktop host does not inherit that `PATH`, set `command` to the absolute executable path instead:

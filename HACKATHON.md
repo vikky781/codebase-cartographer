@@ -32,10 +32,10 @@ Use the included fixture for a predictable demonstration.
 2. Ask Codex: “Before changing `AuthService.authenticate`, build an evidence-backed change-impact plan.”
 3. Show `search_graph` identifying `AuthService.authenticate` in `auth/service.py`.
 4. Show `trace_flow` returning its local path evidence, including source lines and `exact`/`inferred` resolution.
-5. Show the analysis coverage: **29 observed calls, 17 resolved, 12 unresolved, 0 ambiguous**. Explain that unresolved does not mean safe.
+5. Show the analysis coverage: **29 observed calls, 9 resolved, 20 unresolved, 0 ambiguous**. Explain that unresolved does not mean safe.
 6. Ask Codex to label **verified facts**, **inferences**, **unknowns**, and **recommended validation** before it edits code.
 
-The fixture has 11 Python files, 28 functions, 3 classes, 11 modules, 17 resolved call edges, and 9 import edges on the current main branch. It also deliberately contains a cycle and unused-looking code. These are controlled graph conditions, not claims about a production repository.
+The fixture has 11 Python files, 28 functions, 3 classes, 11 modules, 9 resolved call edges, and 9 import edges on the current main branch. It also deliberately contains a cycle and unused-looking code. These are controlled graph conditions, not claims about a production repository.
 
 ## Suggested 2:30 recording outline
 

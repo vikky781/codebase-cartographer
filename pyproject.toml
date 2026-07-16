@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "codebase-cartographer"
 version = "0.1.0"
-description = "MCP server that builds a knowledge graph of any codebase using Tree-sitter AST parsing, git history analysis, and NetworkX graph algorithms. Zero API calls — all local computation."
+description = "Local MCP evidence engine for supported codebases using Tree-sitter parsing, Git history, and NetworkX graph algorithms. No application-level API calls."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

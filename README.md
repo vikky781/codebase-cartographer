@@ -63,7 +63,7 @@ python -m codebase_cartographer.cli analyze "$repo\fixtures\sample_repo" --no-ca
 python -m codebase_cartographer.cli analyze "$(pwd)/fixtures/sample_repo" --no-cache
 ```
 
-On the current fixture, the expected high-level result is 11 Python files, 28 functions, 3 classes, 11 modules, 17 resolved call edges, 9 import edges, and a coverage report of 29 observed / 17 resolved / 12 unresolved calls. The fixture intentionally includes a cycle and unused-looking code so that results are easy to inspect; they are static-analysis candidates, not runtime proof.
+On the current fixture, the expected high-level result is 11 Python files, 28 functions, 3 classes, 11 modules, 9 resolved call edges, 9 import edges, and a coverage report of 29 observed / 9 resolved / 20 unresolved calls. The fixture intentionally includes a cycle and unused-looking code so that results are easy to inspect; they are static-analysis candidates, not runtime proof.
 
 ## Install it in Codex
 
@@ -71,6 +71,7 @@ CodebaseCartographer's primary integration is a local Codex plugin. Install the 
 
 ```bash
 pipx install "git+https://github.com/vikky781/codebase-cartographer.git"
+python -c "import shutil; assert shutil.which('cartographer-mcp'), 'cartographer-mcp is not on PATH'"
 codex plugin marketplace add vikky781/codebase-cartographer --ref main
 codex plugin marketplace list
 ```
@@ -105,17 +106,17 @@ Claude Code and Antigravity wrappers are included for local testing, but the hac
 | `trace_flow` | Forward, backward, or bidirectional paths with relationship provenance, resolution status, and source lines. |
 | `find_issues` | Candidate cycles, unused code, god classes, bottlenecks, orphan files, and high coupling—not runtime verdicts. |
 | `get_metrics` | PageRank, centrality, static line span, Git hotspots, coupling, and ownership. |
-| `visualize` | Focused Mermaid architecture, dependency, layer, call-flow, and hotspot diagrams. |
+| `visualize` | Focused Mermaid architecture, dependency, layer, call-flow, and Git-backed hotspot diagrams. |
 | `get_git_context` | Local authorship, commits, age, and co-change context for an analyzed file. |
 
 ## Capability and confidence matrix
 
 | Source files | Parser | Entities/imports | Calls and source-line provenance | Confidence notes |
 | --- | --- | --- | --- | --- |
-| Python (`.py`) | Tree-sitter | Yes | Yes, only when a unique local target is found | Deepest supported path; dynamic dispatch/framework wiring can still be missed. |
-| JavaScript (`.js`, `.jsx`, `.mjs`) | Tree-sitter | Yes | Yes, only when a unique local target is found | Static evidence, not runtime resolution. |
-| TypeScript (`.ts`) | Tree-sitter | Yes | Yes, only when a unique local target is found | Type aliases, decorators, and framework injection are outside this graph. |
-| TSX (`.tsx`) | Dedicated TSX Tree-sitter grammar | Yes | Yes, only when a unique local target is found | JSX is parsed with the TSX grammar rather than generic TypeScript. |
+| Python (`.py`) | Tree-sitter | Yes | Yes, for a legal lexical/import binding with one local target | Deepest supported path; dynamic dispatch/framework wiring can still be missed. |
+| JavaScript (`.js`, `.jsx`, `.mjs`) | Tree-sitter | Yes | Yes, for a legal ES-module binding with one local target | CommonJS and dynamic module loading are outside this graph. |
+| TypeScript (`.ts`) | Tree-sitter | Yes | Yes, for a legal ES-module binding with one local target | Type aliases, decorators, and framework injection are outside this graph. |
+| TSX (`.tsx`) | Dedicated TSX Tree-sitter grammar | Yes | Yes, for a legal ES-module binding with one local target | JSX is parsed with the TSX grammar rather than generic TypeScript. |
 | Java, Go, Rust, Ruby, PHP, C/C++, C#, Swift, Kotlin, Scala | Regex fallback | Basic declaration/import inventory | No call graph or static line-span evidence | Experimental inventory only; do not use absence of an edge as evidence of safety. |
 
 `complexity` in the API is retained for compatibility, but its current Tree-sitter value is a **static line span**, not cyclomatic complexity or a defect-risk score. A fallback entity has a score of `0` because that measurement is unavailable.
@@ -124,6 +125,7 @@ Claude Code and Antigravity wrappers are included for local testing, but the hac
 
 - **Local by design:** parsing, Git inspection, graph construction, cache reads, and cache writes happen locally. The server does not execute analyzed code.
 - **Precise claims:** ambiguous and unresolved local relationships are counted in `coverage` and are not silently chosen. A graph edge carries `exact` or `inferred` resolution and available source lines.
+- **Bounded results are disclosed:** a scoped analysis sets `is_partial`; Git frequency uses a bounded recent-history window; and cycle analysis reports any graph components skipped for safety limits.
 - **Heuristics are candidates:** dead-code, bottleneck, coupling, and orphan-file findings need validation against framework routes, reflection, plugins, generated code, callbacks, and runtime configuration.
 - **Cache control:** the default disposable `.cartographer_cache/` lives inside the approved repository. Set `use_cache=false` through MCP or pass `--no-cache` to the CLI to avoid both cache reads and writes.
 - **Host boundary:** an MCP host may include returned tool data in model context. Review the host's data and account settings; “no application-level API calls” describes CodebaseCartographer itself, not every service a host may use.
@@ -139,7 +141,7 @@ The build workflow used Codex for iterative parser, graph, packaging, test, and 
 
 ## Reproducible case study
 
-`fixtures/sample_repo` is a small, deterministic demonstration target. Its `AuthService.authenticate` path yields a graph-backed packet that includes resolved local calls to `find_user`, `User.check_password`, `hash_password`, and `_create_session`; inbound evidence from `login`; and 12 observed calls that were intentionally left unresolved rather than guessed. It is a compact way to show the key product behavior: useful evidence plus clear limits.
+`fixtures/sample_repo` is a small, deterministic demonstration target. Its `AuthService.authenticate` path yields a graph-backed packet with resolved local calls to `find_user`, `hash_password`, and `_create_session`; receiver-based calls such as `User.check_password` remain unresolved rather than guessed. It is a compact way to show the key product behavior: useful evidence plus clear limits.
 
 The project does **not** yet claim a benchmarked reduction in regressions or engineering time. A future evaluation should compare evidence-backed Codex plans with ordinary repository exploration on representative private-code tasks.
 
@@ -152,7 +154,7 @@ python -m pytest tests/ -v --tb=short
 python -m build
 ```
 
-GitHub Actions runs lint and tests on Python 3.11 and 3.12, builds a wheel, installs it in a clean virtual environment, and smoke-tests the stdio MCP surface. After editing the Codex plugin bundle, validate it and refresh its cache-busting manifest version:
+GitHub Actions runs lint and tests on Python 3.11 and 3.12, builds a wheel, installs it in a clean virtual environment, analyzes the fixture through the stdio MCP surface, and then queries the resulting graph. After editing the Codex plugin bundle, validate it and refresh its cache-busting manifest version:
 
 ```bash
 python <CODEX_HOME>/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/codebase-cartographer

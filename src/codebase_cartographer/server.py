@@ -38,10 +38,9 @@ from .visualizer import MermaidVisualizer
 mcp = FastMCP(
     "CodebaseCartographer",
     instructions=(
-        "MCP server that builds a knowledge graph of any codebase using Tree-sitter AST "
-        "parsing, git history analysis, and NetworkX graph algorithms. Provides architectural "
-        "insights, dependency tracing, issue detection, and visualization. Zero API calls — "
-        "all computation is local."
+        "Local MCP evidence engine for supported codebases. It uses Tree-sitter parsing, local Git "
+        "history, and NetworkX graph algorithms to provide architecture, dependency, issue, and "
+        "visualization evidence. It makes no application-level API calls."
     ),
 )
 
@@ -219,9 +218,10 @@ def analyze_repo(repo_path: str, scope: str | None = None, use_cache: bool = Tru
     """Analyze a code repository and build a knowledge graph of its structure.
     Call this FIRST before using any other CodebaseCartographer tool.
 
-    This parses all source files using Tree-sitter AST analysis, extracts
-    git history, builds a dependency/call graph, and computes structural
-    metrics (PageRank, centrality, static line span, coupling).
+    This parses supported source files using Tree-sitter AST analysis (with a
+    limited regex fallback), extracts local Git history, builds a dependency/call
+    graph, and computes structural metrics (PageRank, centrality, static line span,
+    coupling).
 
     Parameters:
     - repo_path (required): absolute path to the repository root

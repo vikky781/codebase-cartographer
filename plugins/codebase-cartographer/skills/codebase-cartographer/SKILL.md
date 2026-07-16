@@ -8,8 +8,9 @@ description: Analyze an explicitly user-approved local repository with CodebaseC
 Use the CodebaseCartographer MCP tools to inspect the repository the user has explicitly asked to analyze.
 
 1. Start with `analyze_repo` and an absolute repository path. Use a narrow `scope` when the repository is large.
-2. Read the returned `coverage` and `warnings` before making claims. Treat unresolved or ambiguous
-   relationships as unknown, never as evidence that a dependency does not exist.
+2. Read the returned `coverage`, `warnings`, `analysis_scope`, and `is_partial` before making claims.
+   Treat unresolved or ambiguous relationships as unknown, never as evidence that a dependency does
+   not exist. When `is_partial` is true, say that unscanned files may change the conclusion.
 3. Use `search_graph` to establish facts about functions, classes, and modules before making claims.
 4. For a proposed change, build an evidence packet with `trace_flow`, `get_metrics`, and, when
    relevant, `get_git_context`. Include the exact graph paths, relationship source, resolution,

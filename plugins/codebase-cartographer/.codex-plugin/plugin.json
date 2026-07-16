@@ -1,6 +1,6 @@
 {
   "name": "codebase-cartographer",
-  "version": "0.1.0+codex.20260716094822",
+  "version": "0.1.0+codex.20260716103429",
   "description": "Local codebase intelligence for Codex using static analysis and graph algorithms.",
   "author": {
     "name": "CodebaseCartographer contributors"
