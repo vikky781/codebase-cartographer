@@ -30,13 +30,13 @@ That keeps the model from treating a missing static edge as proof that a runtime
 
 ```mermaid
 flowchart LR
-    repo["Approved local repository"] --> parse["Tree-sitter parsing<br/>regex inventory where needed"]
-    repo --> git["Local Git history"]
-    parse --> graph["Local NetworkX graph<br/>with coverage and provenance"]
-    git --> graph
-    graph --> mcp["Local stdio MCP tools"]
-    mcp --> codex["Codex / GPT-5.6<br/>evidence-backed plan"]
-    codex --> plan["Facts · inferences · unknowns<br/>recommended validation"]
+    source_repo["Approved local repository"] --> ast_parser["Tree-sitter parsing<br/>regex inventory where needed"]
+    source_repo --> local_git["Local Git history"]
+    ast_parser --> evidence_map["Local NetworkX graph<br/>with coverage and provenance"]
+    local_git --> evidence_map
+    evidence_map --> mcp_tools["Local stdio MCP tools"]
+    mcp_tools --> codex_model["Codex / GPT-5.6<br/>evidence-backed plan"]
+    codex_model --> change_plan["Facts · inferences · unknowns<br/>recommended validation"]
 ```
 
 The repository source and graph stay on the local machine during analysis. Tool results may be provided to the selected MCP host/model according to that host's settings and your account plan.
