@@ -30,7 +30,7 @@ class TestMermaidVisualizer:
         assert isinstance(result, str)
 
     def test_call_flow_with_scope(self, visualizer):
-        inp = VisualizeInput(diagram_type="call_flow", scope="login")
+        inp = VisualizeInput(diagram_type="call_flow", scope="main")
         result = visualizer.generate(inp)
         assert "mermaid" in result
         assert "-->|calls|" in result
@@ -63,8 +63,21 @@ class TestMermaidVisualizer:
         inp = VisualizeInput(diagram_type="hotspot_map")
         result = visualizer.generate(inp)
         assert "mermaid" in result
-        assert "static line span" in result.lower()
-        assert "change-frequency data is unavailable" in result.lower()
+        assert "no local git change-frequency data" in result.lower()
+
+    def test_hotspot_diagram_uses_git_change_frequencies(self, built_graph):
+        frequencies = {
+            "auth/service.py": 12,
+            "models/user.py": 4,
+            "utils/helpers.py": 1,
+        }
+        result = MermaidVisualizer(built_graph, frequencies).generate(
+            VisualizeInput(diagram_type="hotspot_map")
+        )
+
+        assert "local git touch frequency" in result.lower()
+        assert "static line span" not in result.lower()
+        assert "style auth_service_py fill:#ff5252" in result
 
     def test_ids_are_safe_unique_and_not_mermaid_keywords(self, visualizer):
         mapped = visualizer._unique_node_ids(

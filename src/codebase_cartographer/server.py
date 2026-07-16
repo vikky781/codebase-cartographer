@@ -283,7 +283,9 @@ def analyze_repo(repo_path: str, scope: str | None = None, use_cache: bool = Tru
                 graph.save_cache(str(repository))
 
         _git_analyzer = git_analyzer
-        _visualizer = MermaidVisualizer(graph)
+        _visualizer = MermaidVisualizer(
+            graph, git_analyzer.get_all_file_change_frequencies()
+        )
         entity_counts: EntityCounts = graph.get_entity_counts()
         edge_counts: EdgeCounts = graph.get_edge_counts()
         health: HealthSummary = graph.get_health_summary()
@@ -641,7 +643,12 @@ def visualize(
                 "not_analyzed", "No repo has been analyzed yet", "Call analyze_repo first"
             )
         if _visualizer is None:
-            _visualizer = MermaidVisualizer(graph)
+            change_frequencies = (
+                _git_analyzer.get_all_file_change_frequencies()
+                if _git_analyzer is not None
+                else {}
+            )
+            _visualizer = MermaidVisualizer(graph, change_frequencies)
         clamped_nodes = max(5, min(max_nodes, get_config().max_mermaid_nodes))
         request = VisualizeInput(
             diagram_type=diagram_type,

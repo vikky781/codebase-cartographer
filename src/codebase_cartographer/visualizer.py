@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
+from .config import get_config
 from .graph import CodeGraph
 from .models import VisualizeInput
 
@@ -55,9 +57,15 @@ _LAYER_DIRECTORY_NAMES = {
 class MermaidVisualizer:
     """Generate compact, valid Mermaid diagrams from a code knowledge graph."""
 
-    def __init__(self, graph: CodeGraph):
+    def __init__(
+        self, graph: CodeGraph, change_frequencies: Mapping[str, int] | None = None
+    ) -> None:
         """Initialize the visualizer for a built code graph."""
         self.graph = graph
+        self.change_frequencies = {
+            str(file_path).replace("\\", "/"): max(0, int(frequency))
+            for file_path, frequency in (change_frequencies or {}).items()
+        }
 
     def generate(self, input: VisualizeInput) -> str:
         """Route a visualization request to its diagram generator."""
@@ -172,7 +180,7 @@ class MermaidVisualizer:
                 "scope parameter required for call_flow diagram. Provide a function or module name."
             )
 
-        start = self._find_node(scope, module_only=False)
+        start = self._find_node(scope, module_only=False, prefer_non_module=True)
         if start is None:
             return self._error_diagram(f"No entity found for scope: {scope}")
 
@@ -307,19 +315,14 @@ class MermaidVisualizer:
         return self._build_mermaid_string(lines)
 
     def _hotspot_diagram(self, max_nodes: int) -> str:
-        """Generate a module map colored by extracted complexity hotspot scores."""
+        """Generate a module map colored by local Git change frequency."""
         module_nodes = self._module_nodes()
         if not module_nodes:
             return self._error_diagram("No modules available for hotspot analysis")
-
-        complexity_by_file: dict[str, float] = {}
-        try:
-            for result in self.graph.get_complexity(top_n=max(1, len(self.graph.entities))):
-                complexity_by_file[result.file_path] = (
-                    complexity_by_file.get(result.file_path, 0.0) + result.score
-                )
-        except Exception:
-            complexity_by_file = {}
+        if not self.change_frequencies:
+            return self._error_diagram(
+                "No local Git change-frequency data is available for a hotspot map"
+            )
 
         pagerank = getattr(self.graph, "_pagerank_cache", None)
         if pagerank is None:
@@ -328,7 +331,7 @@ class MermaidVisualizer:
         selected = sorted(
             module_nodes,
             key=lambda node_id: (
-                -complexity_by_file.get(
+                -self.change_frequencies.get(
                     str(self.graph.graph.nodes[node_id].get("file_path", node_id)), 0.0
                 ),
                 -pagerank.get(node_id, 0.0),
@@ -339,7 +342,10 @@ class MermaidVisualizer:
 
         lines = [
             "flowchart TD",
-        "%% Colors indicate static line span; Git change-frequency data is unavailable.",
+            (
+                "%% Colors show local Git touch frequency in the most recent "
+                f"{get_config().max_git_history_commits} commits (red=more frequent)."
+            ),
         ]
         lines.extend(self._node_definition(node_id, node_ids[node_id]) for node_id in selected)
         for source, target, attributes in self.graph.graph.edges(data=True):
@@ -351,7 +357,7 @@ class MermaidVisualizer:
             sorted(
                 selected,
                 key=lambda item: (
-                    -complexity_by_file.get(
+                    -self.change_frequencies.get(
                         str(self.graph.graph.nodes[item].get("file_path", item)), 0.0
                     )
                 ),
@@ -377,7 +383,9 @@ class MermaidVisualizer:
             if attributes.get("type") == "module"
         ]
 
-    def _find_node(self, scope: str, module_only: bool) -> str | None:
+    def _find_node(
+        self, scope: str, module_only: bool, prefer_non_module: bool = False
+    ) -> str | None:
         """Find a graph node by id, name, path, or case-insensitive partial match."""
         if scope in self.graph.graph and (
             not module_only or self.graph.graph.nodes[scope].get("type") == "module"
@@ -395,6 +403,14 @@ class MermaidVisualizer:
             )
         ]
         if candidates:
+            if prefer_non_module:
+                non_module_candidates = [
+                    node_id
+                    for node_id in candidates
+                    if self.graph.graph.nodes[node_id].get("type") != "module"
+                ]
+                if non_module_candidates:
+                    return sorted(non_module_candidates)[0]
             return sorted(candidates)[0]
 
         partial_matches = [
@@ -406,6 +422,14 @@ class MermaidVisualizer:
                 or normalized_scope in str(attributes.get("file_path", "")).casefold()
             )
         ]
+        if prefer_non_module:
+            non_module_matches = [
+                node_id
+                for node_id in partial_matches
+                if self.graph.graph.nodes[node_id].get("type") != "module"
+            ]
+            if non_module_matches:
+                return sorted(non_module_matches)[0]
         return sorted(partial_matches)[0] if partial_matches else None
 
     def _unique_node_ids(self, node_ids: list[str]) -> dict[str, str]:
