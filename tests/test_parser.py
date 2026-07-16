@@ -124,3 +124,55 @@ class TestParseRepository:
         parsed_files, _ = parse_repository(local_tmp_path)
 
         assert {edge.target_module for edge in parsed_files[0].imports} == {"alpha", "beta"}
+
+    @pytest.mark.parametrize(
+        ("filename", "source", "expected_entities"),
+        [
+            (
+                "module.js",
+                'import { format } from "./format";\n'
+                "export function greet(name) { return format(name); }\n"
+                "const trim = (value) => value.trim();\n",
+                {"greet", "trim"},
+            ),
+            (
+                "module.ts",
+                'import { format } from "./format";\n'
+                "export function greet(name: string): string { return format(name); }\n"
+                "const trim = (value: string) => value.trim();\n",
+                {"greet", "trim"},
+            ),
+            (
+                "component.tsx",
+                'import React from "react";\n'
+                "type Props = { name: string };\n"
+                "export const Greeting = ({ name }: Props) => <div>{name.toUpperCase()}</div>;\n",
+                {"Greeting"},
+            ),
+        ],
+    )
+    def test_parses_javascript_family_files_with_tree_sitter(
+        self, local_tmp_path, filename, source, expected_entities
+    ):
+        """Supported JavaScript-family extensions must use their correct grammar."""
+        (local_tmp_path / filename).write_text(source, encoding="utf-8")
+
+        parsed_files, warnings = parse_repository(local_tmp_path)
+
+        assert warnings == []
+        assert len(parsed_files) == 1
+        parsed_file = parsed_files[0]
+        assert parsed_file.parse_method == "tree-sitter"
+        assert parsed_file.language in {"javascript", "typescript"}
+        assert expected_entities <= {
+            entity.name for entity in parsed_file.entities if entity.type == "function"
+        }
+
+    def test_reports_tree_sitter_syntax_recovery_without_skipping_the_file(self, local_tmp_path):
+        """Malformed source must produce a clear coverage warning instead of a silent graph."""
+        (local_tmp_path / "broken.py").write_text("def incomplete(:\n", encoding="utf-8")
+
+        parsed_files, warnings = parse_repository(local_tmp_path)
+
+        assert len(parsed_files) == 1
+        assert any("recovered from syntax errors" in warning for warning in warnings)

@@ -126,7 +126,9 @@ class TreeSitterManager:
 
     def get_parser(self, language: str) -> Parser | None:
         """Return a cached parser, creating it lazily when possible."""
-        if language not in TREE_SITTER_LANGUAGES:
+        # ``tsx`` is a TypeScript dialect selected from the ``.tsx`` extension.
+        # It intentionally shares the public language label ``typescript``.
+        if language not in TREE_SITTER_LANGUAGES and language != "tsx":
             return None
         if language in self._parsers:
             return self._parsers[language]
@@ -139,6 +141,8 @@ class TreeSitterManager:
                     self._languages[language] = Language(tsjavascript.language())
                 elif language == "typescript":
                     self._languages[language] = Language(tstypescript.language_typescript())
+                elif language == "tsx":
+                    self._languages[language] = Language(tstypescript.language_tsx())
                 else:
                     return None
 
@@ -629,7 +633,8 @@ def parse_repository(
                 continue
 
             if language:
-                root_node = manager.parse_file(source_bytes, language)
+                parser_language = "tsx" if extension == ".tsx" else language
+                root_node = manager.parse_file(source_bytes, parser_language)
                 if root_node is None:
                     message = f"Tree-sitter could not parse {file_path}"
                     results.append(
@@ -645,6 +650,12 @@ def parse_repository(
                     )
                     warnings.append(message)
                     continue
+
+                if root_node.has_error:
+                    warnings.append(
+                        f"Tree-sitter recovered from syntax errors in {file_path}; "
+                        "results may be incomplete."
+                    )
 
                 if language == "python":
                     entities, imports, calls = python_extractor.extract(
