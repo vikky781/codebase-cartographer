@@ -38,11 +38,31 @@ On macOS and Linux, the corresponding path normally ends in `/bin/cartographer-m
 
 | Host | Wrapper/configuration |
 | --- | --- |
-| Codex | `plugins/codebase-cartographer/.mcp.json`, installed through the repository's `marketplace.json`. |
+| Codex | `plugins/codebase-cartographer/.mcp.json`, installed through `.agents/plugins/marketplace.json`. |
 | Claude Code | `integrations/claude-code/.mcp.json`, installed as a Claude plugin or copied to a project `.mcp.json`. |
 | Antigravity | `integrations/antigravity/mcp_config.json`, installed as a plugin or copied to `.agents/mcp_config.json`. |
 
 All configurations use local stdio. There is no HTTP endpoint, access token, or server-side code upload in the CodebaseCartographer process.
+
+## Codex marketplace
+
+The repository marketplace is already tracked at `.agents/plugins/marketplace.json`; do not copy or
+create another catalog. From a checkout, add it as a marketplace source:
+
+```bash
+codex plugin marketplace add ./
+```
+
+Or add the public repository directly:
+
+```bash
+codex plugin marketplace add vikky781/codebase-cartographer --ref main
+```
+
+Restart the ChatGPT/Codex desktop app, open **Plugins**, select **Codebase Cartographer Local**,
+and install `codebase-cartographer`. The MCP server requires the `cartographer-mcp` executable to
+be installed first; the marketplace bundle intentionally does not install Python dependencies for
+the host.
 
 ## Troubleshooting
 

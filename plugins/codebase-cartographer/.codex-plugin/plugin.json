@@ -1,6 +1,6 @@
 {
   "name": "codebase-cartographer",
-  "version": "0.1.0+codex.20260715210003",
+  "version": "0.1.0+codex.20260716094822",
   "description": "Local codebase intelligence for Codex using static analysis and graph algorithms.",
   "author": {
     "name": "CodebaseCartographer contributors"
@@ -25,9 +25,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Analyze this repository and summarize its architecture.",
-      "Find the most important dependencies and likely bottlenecks.",
-      "Trace the flow through the authentication code."
+      "Before changing this unfamiliar repository, build an evidence-backed change-impact plan.",
+      "Trace what could break if I change this function, separating facts, inferences, and unknowns.",
+      "Analyze this repository's architecture and identify the most important dependencies with their evidence."
     ],
     "brandColor": "#2563EB"
   },

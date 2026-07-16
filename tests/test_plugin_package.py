@@ -38,10 +38,12 @@ def test_plugin_mcp_configuration_launches_the_packaged_server_command() -> None
     assert manifest["version"].split("+", 1)[0] == project["project"]["version"]
 
 
-def test_project_marketplace_points_to_the_plugin_source() -> None:
-    marketplace = json.loads((PROJECT_ROOT / "marketplace.json").read_text(encoding="utf-8"))
+def test_canonical_project_marketplace_points_to_the_plugin_source() -> None:
+    marketplace_path = PROJECT_ROOT / ".agents" / "plugins" / "marketplace.json"
+    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
     entry = next(item for item in marketplace["plugins"] if item["name"] == "codebase-cartographer")
 
     assert entry["source"] == {"source": "local", "path": "./plugins/codebase-cartographer"}
     assert entry["policy"]["installation"] == "AVAILABLE"
     assert entry["policy"]["authentication"] == "ON_INSTALL"
+    assert not (PROJECT_ROOT / "marketplace.json").exists()
