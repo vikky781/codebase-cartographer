@@ -146,6 +146,37 @@ class TestTrace:
         result = built_graph.trace("find_user", direction="backward")
         assert isinstance(result.steps, list)
 
+    def test_trace_preserves_the_detected_entity_source(self):
+        """Trace provenance must not claim AST evidence for fallback-parsed entities."""
+        graph = CodeGraph()
+        caller = CodeEntity(
+            name="caller",
+            type="function",
+            file_path="legacy.java",
+            line_start=1,
+            line_end=1,
+            source="regex-fallback",
+        )
+        callee = CodeEntity(
+            name="callee",
+            type="function",
+            file_path="legacy.java",
+            line_start=2,
+            line_end=2,
+            source="regex-fallback",
+        )
+        graph.entities = {
+            "legacy.java::caller": caller,
+            "legacy.java::callee": callee,
+        }
+        graph.graph.add_node("legacy.java::caller", type="function", name="caller")
+        graph.graph.add_node("legacy.java::callee", type="function", name="callee")
+        graph.graph.add_edge("legacy.java::caller", "legacy.java::callee", type="calls")
+
+        result = graph.trace("caller")
+
+        assert result.steps[0].source == "regex-fallback"
+
 
 class TestHealthSummary:
     def test_health_summary(self, built_graph):

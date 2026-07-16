@@ -374,6 +374,7 @@ class CodeGraph:
                         depth=depth + 1,
                         entity=entity.model_copy(deep=True),
                         relationship=relationship,
+                        source=entity.source,
                     )
                 )
                 if len(steps) >= config.max_trace_steps:
