@@ -36,6 +36,7 @@ jobs:
           .release-venv/bin/python -m pip install dist/*.whl
           .release-venv/bin/python - <<'PY'
           import asyncio
+          import json
           import shutil
           import sys
           from pathlib import Path
@@ -51,6 +52,16 @@ jobs:
                   StdioTransport(command=str(executable), args=[], cwd=str(Path.cwd())), timeout=20
               ) as client:
                   tools = await client.list_tools()
+                  analysis = await client.call_tool(
+                      "analyze_repo",
+                      {
+                          "repo_path": str(Path.cwd() / "fixtures" / "sample_repo"),
+                          "use_cache": False,
+                      },
+                  )
+                  payload = json.loads(analysis.data)
+                  search = await client.call_tool("search_graph", {"query": "authenticate"})
+                  entities = json.loads(search.data)
               assert {tool.name for tool in tools} == {
                   "analyze_repo",
                   "search_graph",
@@ -60,6 +71,11 @@ jobs:
                   "visualize",
                   "get_git_context",
               }
+              assert analysis.is_error is False
+              assert payload["status"] == "success"
+              assert payload["files_analyzed"] == 11
+              assert payload["coverage"]["tree_sitter_files"] == 11
+              assert any(entity["name"] == "AuthService.authenticate" for entity in entities)
 
 
           asyncio.run(verify())
